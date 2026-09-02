@@ -228,17 +228,23 @@ diagnostics = {{
     log_verbosity = 3;
     statistics = "yes";
 }};
+"""
 
-alsa = {{
-    audio_backend_latency = {self._buffer_seconds};
-}};
-
-{f'''pa = {{
+        if sink_name:
+            conf += f"""
+pa = {{
     application_name = "{safe_name}";
     device = "{sink_name}";
 }};
-''' if sink_name else ''}
+"""
+        else:
+            conf += f"""
+alsa = {{
+    audio_backend_latency = {self._buffer_seconds};
+}};
+"""
 
+        conf += f"""
 metadata = {{
     enabled = "yes";
     include_cover_art = "yes";

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.33 (2026-09-02)
+
+- **Fixed shairport-sync using ALSA backend instead of PulseAudio — root cause of audio crash**: the generated `shairport-sync.conf` included BOTH an `alsa = {}` block and a `pa = {}` block when a Bluetooth sink was available. shairport-sync prioritizes ALSA when both backends are configured, so it tried to open the ALSA `default` device — which failed with "Unable to set hw parameters: I/O error" and crashed. Now only the `pa` (PulseAudio) backend is written when a Bluetooth A2DP sink exists; the `alsa` block is used exclusively as a fallback when no sink is available.
+
 ## 2.0.32 (2026-09-02)
 
 - **Fixed A2DP sink never appearing — conflicting sound server removed**: the Docker image installed both `pulseaudio-bluez` (PulseAudio's BlueZ modules) and `pipewire-spa-bluez` (PipeWire's BlueZ SPA plugin). Both competed for BlueZ A2DP transport ownership, causing `RegisterProfile() failed: org.bluez.Error.NotPermitted` and "Multiple sound server instances" warnings. PipeWire's BlueZ plugin could not register the A2DP profile, so no `bluez_sink` node was ever created for some devices. Removed `pulseaudio-bluez` from the Dockerfile — only PipeWire now manages Bluetooth audio.
