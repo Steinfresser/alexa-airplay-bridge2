@@ -312,6 +312,9 @@ class PipeWireManager:
                 # audio immediately results in silence or dropped packets.
                 _LOG.info("[PipeWire] Waiting 2s for A2DP transport to settle for %s", mac)
                 time.sleep(2.0)
+                # Force the transport to acquire — PipeWire can leave the sink
+                # SUSPENDED where audio is silently discarded.
+                self._force_transport(sink)
                 if on_found is not None:
                     try:
                         on_found(sink)
@@ -428,7 +431,7 @@ class PipeWireManager:
             _LOG.warning("[PipeWire] Failed to generate test WAV: %s", exc)
             return False
 
-    def _get_test_wav(self) -> str:
+    def _get_test_wav(self, duration: float = 3.0) -> str:
         """Return a path to a test WAV file, generating one if the stock file is missing."""
         if os.path.isfile(_TEST_WAV_PATH):
             return _TEST_WAV_PATH
@@ -436,18 +439,31 @@ class PipeWireManager:
         tmp_path = os.path.join(tempfile.gettempdir(), "bridge_test_tone.wav")
         if os.path.isfile(tmp_path):
             return tmp_path
-        if self._generate_test_wav(tmp_path):
+        if self._generate_test_wav(tmp_path, duration=duration):
             _LOG.info("[PipeWire] Generated test tone at %s", tmp_path)
             return tmp_path
         return _TEST_WAV_PATH  # last resort — let the player report the error
 
+    def _force_transport(self, sink: str) -> None:
+        """Force the A2DP transport to (re)acquire by suspending and resuming the sink.
+
+        PipeWire can leave a Bluetooth A2DP sink in SUSPENDED state where the
+        transport isn't actually acquired. Audio written to the sink disappears
+        silently. A suspend/resume cycle forces WirePlumber to re-acquire the
+        Bluetooth transport before we attempt to play audio.
+        """
+        self._run_cmd_env(["pactl", "suspend-sink", sink, "1"])
+        time.sleep(0.5)
+        self._run_cmd_env(["pactl", "suspend-sink", sink, "0"])
+        time.sleep(1.0)
+
     def play_test_sound(self, mac: str) -> bool:
         """Play a short test tone to the Bluetooth sink (or default sink).
 
-        Tries the A2DP sink for ``mac`` first, then falls back to the
-        PipeWire default sink so audio always reaches the connected device.
-        Uses pw-play, paplay, and aplay with proper env vars as fallbacks.
-        Generates a sine-wave WAV in-memory if the stock ALSA test file is missing.
+        Forces the A2DP transport to (re)acquire before playing, since
+        PipeWire can leave Bluetooth sinks in SUSPENDED state where audio
+        is silently discarded. Uses a 5-second tone to give the transport
+        time to settle after the suspend/resume cycle.
         """
         sink = self.find_bluetooth_sink(mac)
         if sink is None:
@@ -455,6 +471,10 @@ class PipeWireManager:
         if sink is None:
             _LOG.warning("[PipeWire] No sink available for test sound to %s", mac)
             return False
+
+        # Force the A2DP transport to acquire before doing anything else.
+        _LOG.info("[PipeWire] Forcing A2DP transport for sink %s", sink)
+        self._force_transport(sink)
 
         # Unmute and set volume to 100% before playing.
         self._run_cmd_env(["pactl", "set-sink-mute", sink, "0"])
@@ -467,12 +487,16 @@ class PipeWireManager:
                   " ".join(l.strip() for l in vol_out.splitlines() if "volume" in l.lower()),
                   " ".join(l.strip() for l in mute_out.splitlines() if "mute" in l.lower()))
 
-        test_file = self._get_test_wav()
+        # Generate a 5-second tone — the first 1-2 seconds may be consumed by
+        # the A2DP transport handshake, so a longer tone ensures audible output.
+        test_file = self._get_test_wav(duration=5.0)
         pulse_server = f"unix:{self._runtime_dir}/pulse/native"
 
         _LOG.info("[PipeWire] Playing test sound to %s (sink=%s, file=%s)", mac, sink, test_file)
 
-        # Build a list of (command, env) pairs to try in order.
+        pw_env = self.env
+        pw_env["PULSE_SERVER"] = pulse_server
+
         attempts = [
             (["paplay", "--server", pulse_server, "--device", sink, test_file], None),
             (["paplay", "--device", sink, test_file], None),
@@ -480,12 +504,8 @@ class PipeWireManager:
             (["aplay", "-D", f"pulse:{sink}", test_file], None),
         ]
 
-        # Use the PipeWire env for all attempts.
-        pw_env = self.env
-        pw_env["PULSE_SERVER"] = pulse_server
-
         for cmd, _ in attempts:
-            code, out = self._run_cmd_env(cmd, timeout=5, env=pw_env)
+            code, out = self._run_cmd_env(cmd, timeout=10, env=pw_env)
             if code == 0:
                 _LOG.info("[PipeWire] Test sound played to %s via %s", mac, sink)
                 return True
