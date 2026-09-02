@@ -24,7 +24,6 @@ RUN apk add --no-cache \
         libtool \
         pkgconf \
         git \
-        cmake \
         alsa-lib-dev \
         pulseaudio-dev \
         pipewire-dev \
@@ -43,9 +42,8 @@ WORKDIR /tmp
 # decoder handles all prediction types correctly.
 RUN git clone --depth=1 https://github.com/mikebrady/ALAC.git /tmp/alac \
     && cd /tmp/alac \
-    && mkdir build \
-    && cd build \
-    && cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. \
+    && autoreconf -fi \
+    && ./configure --prefix=/usr/local \
     && make -j$(nproc) \
     && make install DESTDIR=/tmp/alac-install
 
