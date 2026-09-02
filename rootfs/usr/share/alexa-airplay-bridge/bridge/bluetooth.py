@@ -1122,6 +1122,12 @@ class BluetoothManager:
         auto-connect it), BlueZ returns org.bluez.Error.Failed. We treat this
         as success since the desired state (A2DP connected) is already true.
 
+        However, if the transport was acquired by a competing sound server
+        (e.g. pulseaudio-bluez), the profile appears "connected" but
+        WirePlumber never creates the sink node. In that case we force a
+        Disconnect/Connect cycle to release the stale transport and let
+        WirePlumber acquire it cleanly.
+
         Retries up to 3 times with a 2s delay for transient failures.
         """
         if not _dbus_ok or self._bus is None:
@@ -1137,9 +1143,23 @@ class BluetoothManager:
                 _LOG.info("[BT] A2DP profile connected for %s (attempt %d)", mac, attempt)
                 return
             # org.bluez.Error.Failed usually means the profile is already
-            # connected — treat as success.
+            # connected — but if WirePlumber hasn't created the sink, the
+            # transport may be held by a stale/competing sound server.
+            # Force a disconnect/reconnect to release it.
             if "Error.Failed" in (err or ""):
                 _LOG.info("[BT] A2DP profile already connected for %s (ConnectProfile returned Error.Failed)", mac)
+                _LOG.info("[BT] Forcing A2DP disconnect/reconnect to release stale transport for %s", mac)
+                self._dbus_call(path, _DEVICE_IFACE, "DisconnectProfile",
+                                signature="s", body=[_A2DP_UUID], timeout=10)
+                time.sleep(1.5)
+                ok2, err2 = self._dbus_call(
+                    path, _DEVICE_IFACE, "ConnectProfile",
+                    signature="s", body=[_A2DP_UUID], timeout=15,
+                )
+                if ok2:
+                    _LOG.info("[BT] A2DP profile re-connected for %s after stale transport release", mac)
+                    return
+                _LOG.warning("[BT] A2DP reconnect failed for %s: %s — will retry via sink polling", mac, err2)
                 return
             _LOG.warning("[BT] A2DP ConnectProfile attempt %d/%d failed for %s: %s",
                          attempt, max_attempts, mac, err)

@@ -294,26 +294,26 @@ class PipeWireManager:
         seconds to negotiate the A2DP profile and create the sink node. This
         method polls every ``interval`` seconds for up to ``timeout`` seconds.
 
+        If the BlueZ card exists but the sink node hasn't appeared after
+        half the timeout, a forced Disconnect/Connect cycle is triggered to
+        release any stale transport held by a competing sound server and let
+        WirePlumber acquire it cleanly.
+
         If ``on_found`` is provided, it is called with the sink name as soon
         as the sink is discovered — typically used to regenerate the Shairport
         config and restart the instance.
         """
         deadline = time.time() + timeout
         attempt = 0
+        forced_reconnect = False
         while time.time() < deadline:
             attempt += 1
             sink = self.find_bluetooth_sink(mac)
             if sink:
                 _LOG.info("[PipeWire] A2DP sink %s appeared after %d attempt(s) for %s", sink, attempt, mac)
                 self.set_default_sink(sink)
-                # Wait for the A2DP transport to fully initialize before
-                # allowing audio to be routed. PipeWire creates the sink node
-                # before the Bluetooth audio transport is ready — playing
-                # audio immediately results in silence or dropped packets.
                 _LOG.info("[PipeWire] Waiting 2s for A2DP transport to settle for %s", mac)
                 time.sleep(2.0)
-                # Force the transport to acquire — PipeWire can leave the sink
-                # SUSPENDED where audio is silently discarded.
                 self._force_transport(sink)
                 if on_found is not None:
                     try:
@@ -321,17 +321,48 @@ class PipeWireManager:
                     except Exception as exc:  # noqa: BLE001
                         _LOG.warning("[PipeWire] on_found callback error: %s", exc)
                 return sink
-            # Try setting the card profile to a2dp_sink with a single attempt.
-            # The polling loop itself provides the retry cadence — using
-            # retries=5 here would block for 5s per iteration, leaving only
-            # ~5 sink checks in the 30s window.
             self.set_card_profile(mac, "a2dp_sink", retries=1)
+
+            # Recovery: if we're past half the timeout and the card exists
+            # but no sink has appeared, force a disconnect/reconnect to
+            # release a stale transport that a competing sound server may
+            # be holding.
+            elapsed = time.time() - (deadline - timeout)
+            if not forced_reconnect and elapsed > timeout * 0.5:
+                cards_out = self.list_cards()
+                mac_clean = mac.upper().replace(":", "_")
+                card_exists = any(mac_clean.lower() in line.lower() for line in cards_out.splitlines())
+                if card_exists:
+                    _LOG.warning("[PipeWire] Card exists but no sink after %.0fs — forcing BT reconnect for %s", elapsed, mac)
+                    forced_reconnect = True
+                    self._force_bt_reconnect(mac)
+                    continue
+
             remaining = deadline - time.time()
             if remaining > interval:
                 time.sleep(interval)
         _LOG.warning("[PipeWire] A2DP sink for %s did not appear within %.1fs", mac, timeout)
         _LOG.warning("[PipeWire] Diagnostics for %s:\n%s", mac, self.dump_diagnostics())
         return None
+
+    def _force_bt_reconnect(self, mac: str) -> None:
+        """Force a Bluetooth disconnect/reconnect to release stale A2DP transport.
+
+        When the BlueZ card exists but no sink node appears, the A2DP transport
+        is often held by a stale connection or a competing sound server. A full
+        Disconnect/Connect cycle on the BlueZ device releases the transport and
+        gives WirePlumber a clean chance to acquire it.
+        """
+        _LOG.info("[PipeWire] Forcing BT disconnect/reconnect for %s", mac)
+        path = _mac_to_path(mac)
+        self._run_cmd_env(["bluetoothctl", "disconnect", mac], timeout=10)
+        time.sleep(2.0)
+        self._run_cmd_env(["bluetoothctl", "connect", mac], timeout=15)
+        time.sleep(2.0)
+        # Re-trigger A2DP profile connection.
+        self._run_cmd_env(["bluetoothctl", "menu", "transport"], timeout=5)
+        # Try setting the card profile again after reconnect.
+        self.set_card_profile(mac, "a2dp_sink", retries=3)
 
     def find_bluetooth_sink(self, mac: str) -> Optional[str]:
         """Find the PipeWire/Pulse sink name for a connected Bluetooth MAC.

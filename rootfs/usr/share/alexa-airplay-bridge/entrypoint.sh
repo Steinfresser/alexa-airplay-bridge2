@@ -65,4 +65,15 @@ else
     echo "[entrypoint] WARNING: Could not start private D-Bus session bus (rc=$DBUS_SESSION_RC)"
 fi
 
+# ---------------------------------------------------------------------------
+# WirePlumber headless configuration.
+#
+# In a container there is no logind/seatd, so seat-monitoring fails to load.
+# The override at /etc/wireplumber/wireplumber.conf disables it and sets
+# Bluetooth to auto-switch to A2DP sink profile on connect.
+# WirePlumber reads configs from XDG_CONFIG_DIRS and /etc/wireplumber/.
+# ---------------------------------------------------------------------------
+export XDG_CONFIG_DIRS="/etc"
+
+echo "[entrypoint] Configuration complete — starting bridge."
 exec python3 /usr/share/alexa-airplay-bridge/run.py

@@ -100,7 +100,6 @@ RUN apk add --no-cache \
         wireplumber \
         pulseaudio \
         pulseaudio-alsa \
-        pulseaudio-bluez \
         pulseaudio-utils \
         python3 \
         py3-pip \
@@ -149,6 +148,6 @@ LABEL io.hass.name="AirPlay to Bluetooth Bridge"
 LABEL io.hass.description="Bridge AirPlay audio to Amazon Echo Bluetooth speakers"
 LABEL io.hass.arch="amd64,aarch64"
 LABEL io.hass.type="addon"
-LABEL io.hass.version="2.0.31"
+LABEL io.hass.version="2.0.32"
 
 CMD ["/usr/share/alexa-airplay-bridge/entrypoint.sh"]

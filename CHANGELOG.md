@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.32 (2026-09-02)
+
+- **Fixed A2DP sink never appearing — conflicting sound server removed**: the Docker image installed both `pulseaudio-bluez` (PulseAudio's BlueZ modules) and `pipewire-spa-bluez` (PipeWire's BlueZ SPA plugin). Both competed for BlueZ A2DP transport ownership, causing `RegisterProfile() failed: org.bluez.Error.NotPermitted` and "Multiple sound server instances" warnings. PipeWire's BlueZ plugin could not register the A2DP profile, so no `bluez_sink` node was ever created for some devices. Removed `pulseaudio-bluez` from the Dockerfile — only PipeWire now manages Bluetooth audio.
+- **Fixed stale A2DP transport — forced disconnect/reconnect on "already connected"**: when `ConnectProfile` returned `Error.Failed` (profile already connected), the bridge treated it as success. But the transport was often held by a stale connection or a competing sound server, so WirePlumber never created the sink node. The bridge now performs an explicit `DisconnectProfile`/`ConnectProfile` cycle when `Error.Failed` is returned, releasing the stale transport and letting WirePlumber acquire it cleanly.
+- **Added WirePlumber headless configuration override**: in a Docker container there is no logind/seatd, so `monitor.bluez.seat-monitoring` fails to load and spams warnings. A new `/etc/wireplumber/wireplumber.conf` override explicitly disables `seat-monitoring` and `logind`, and configures WirePlumber to automatically switch connected Bluetooth devices to the `a2dp_sink` profile — so the `bluez_sink` node is created immediately on connect without needing a manual `set-card-profile` call.
+- **Added automatic BT reconnect recovery in sink polling**: when the BlueZ card exists but no sink node appears after half the timeout, the bridge now forces a full Bluetooth disconnect/reconnect cycle (`bluetoothctl disconnect` + `connect`) to release any stale transport held by a competing sound server. This recovers devices that would otherwise never get an A2DP sink.
+
 ## 2.0.31 (2026-09-02)
 
 - **Fixed silent test sound and AirPlay audio — A2DP transport not acquired**: PipeWire created the A2DP sink node but left it in SUSPENDED state where the Bluetooth audio transport was never actually acquired. Audio written to the sink was silently discarded — `paplay` returned success but no sound reached the speaker. The bridge now performs a suspend/resume cycle (`pactl suspend-sink`) before playing any audio, forcing WirePlumber to (re)acquire the Bluetooth transport.
