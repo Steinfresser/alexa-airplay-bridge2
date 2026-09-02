@@ -48,12 +48,9 @@ MAC_NORM="${NEW_MAC//:/_}"
 log "Waiting for A2DP sink to appear (up to ${A2DP_WAIT_SECONDS}s)..."
 sink_name=""
 for i in $(seq 1 "$A2DP_WAIT_SECONDS"); do
-    sink_name="$(pactl --server "unix:${PULSE_SOCKET}" list sinks short 2>/dev/null \
+    # Try with explicit server first, then fall back to env-based discovery.
+    sink_name="$(pactl list sinks short 2>/dev/null \
         | grep -i "${MAC_NORM}" | awk '{print $2}' | head -1)"
-    if [ -z "$sink_name" ]; then
-        sink_name="$(pactl list sinks short 2>/dev/null \
-            | grep -i "${MAC_NORM}" | awk '{print $2}' | head -1)"
-    fi
     if [ -n "$sink_name" ]; then
         log "A2DP sink found: ${sink_name} (after ${i}s)"
         break
@@ -64,29 +61,25 @@ done
 # --- 2. Route audio to the sink -------------------------------------------
 if [ -n "$sink_name" ]; then
     log "Routing audio to sink: ${sink_name}"
-    pactl --server "unix:${PULSE_SOCKET}" set-default-sink "$sink_name" 2>&1 \
-        | while read -r line; do log "  $line"; done
     pactl set-default-sink "$sink_name" 2>&1 | while read -r line; do log "  $line"; done
-    pactl --server "unix:${PULSE_SOCKET}" set-sink-mute "$sink_name" 0 2>/dev/null || true
-    pactl --server "unix:${PULSE_SOCKET}" set-sink-volume "$sink_name" 100% 2>/dev/null || true
-    pactl set-sink-mute "$sink_name" 0 2>/dev/null || true
-    pactl set-sink-volume "$sink_name" 100% 2>/dev/null || true
+    pactl set-sink-mute "$sink_name" 0 2>&1 | while read -r line; do log "  $line"; done
+    pactl set-sink-volume "$sink_name" 100% 2>&1 | while read -r line; do log "  $line"; done
     log "Sink ${sink_name} unmuted and volume set to 100%"
 
     # Move any existing playback streams to the new sink.
-    pactl --server "unix:${PULSE_SOCKET}" list short 2>/dev/null \
+    pactl list short 2>/dev/null \
         | grep "protocol-native" | awk '{print $1}' | while read -r stream_id; do
-        pactl --server "unix:${PULSE_SOCKET}" move-sink-input "$stream_id" "$sink_name" 2>/dev/null \
-            || true
+        pactl move-sink-input "$stream_id" "$sink_name" 2>&1 \
+            | while read -r line; do log "  move $stream_id: $line"; done || true
     done
     log "Audio routing complete for ${AIRPLAY_NAME} (${NEW_MAC})"
 else
     log "WARNING: A2DP sink for ${NEW_MAC} not found after ${A2DP_WAIT_SECONDS}s — audio may route to default output"
-    fallback_sink="$(pactl --server "unix:${PULSE_SOCKET}" list sinks short 2>/dev/null \
+    # Dump pactl state for debugging.
+    log "Available sinks:"
+    pactl list sinks short 2>&1 | while read -r line; do log "  $line"; done
+    fallback_sink="$(pactl list sinks short 2>/dev/null \
         | grep -i bluez | awk '{print $2}' | head -1)"
-    if [ -z "$fallback_sink" ]; then
-        fallback_sink="$(pactl list sinks short 2>/dev/null | grep -i bluez | awk '{print $2}' | head -1)"
-    fi
     if [ -n "$fallback_sink" ]; then
         log "Using fallback bluez sink: ${fallback_sink}"
         pactl set-default-sink "$fallback_sink" 2>&1 | while read -r line; do log "  $line"; done

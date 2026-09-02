@@ -36,12 +36,24 @@ RUN apk add --no-cache \
 
 WORKDIR /tmp
 
+# Build the Apple ALAC decoder library from source.
+# The Hammerton decoder (shairport-sync's default) crashes (SIGSEGV) on
+# modern iOS ALAC streams that use prediction type 15. The Apple ALAC
+# decoder handles all prediction types correctly.
+RUN git clone --depth=1 https://github.com/mikebrady/ALAC.git /tmp/alac \
+    && cd /tmp/alac \
+    && make -j$(nproc) \
+    && make install DESTDIR=/tmp/alac-install
+
 RUN git clone --depth=1 https://github.com/mikebrady/shairport-sync.git /tmp/shairport-sync
 
 WORKDIR /tmp/shairport-sync
 
 RUN autoreconf -fi \
-    && ./configure \
+    && PKG_CONFIG_PATH="/tmp/alac-install/usr/local/lib/pkgconfig" \
+       CFLAGS="-I/tmp/alac-install/usr/local/include" \
+       LDFLAGS="-L/tmp/alac-install/usr/local/lib" \
+       ./configure \
         --with-alsa \
         --with-pa \
         --with-soxr \
@@ -49,19 +61,26 @@ RUN autoreconf -fi \
         --with-tinysvcmdns \
         --with-metadata \
         --with-dbus-interface \
+        --with-apple-alac \
         --sysconfdir=/etc \
         --prefix=/usr \
     && make -j$(nproc) \
     && make install DESTDIR=/tmp/install
+
+# Copy the Apple ALAC shared library into the install tree.
+RUN cp /tmp/alac-install/usr/local/lib/libalac.so* /tmp/install/usr/lib/ 2>/dev/null || true
 
 # ===========================================================================
 # Stage 2 — Runtime image.
 # ===========================================================================
 FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
 
-# Copy the compiled shairport-sync binary and config from the builder.
+# Copy the compiled shairport-sync binary, Apple ALAC library, and config.
 COPY --from=builder /tmp/install/usr/bin/shairport-sync /usr/bin/shairport-sync
+COPY --from=builder /tmp/install/usr/lib/libalac.so* /usr/lib/
 COPY --from=builder /tmp/install/etc/shairport-sync.conf.sample /etc/shairport-sync.conf.sample
+
+RUN ldconfig /usr/lib 2>/dev/null || true
 
 # Install runtime dependencies (no Avahi or avahi-compat-libdns_sd needed).
 RUN apk add --no-cache \
@@ -125,6 +144,6 @@ LABEL io.hass.name="AirPlay to Bluetooth Bridge"
 LABEL io.hass.description="Bridge AirPlay audio to Amazon Echo Bluetooth speakers"
 LABEL io.hass.arch="amd64,aarch64"
 LABEL io.hass.type="addon"
-LABEL io.hass.version="2.0.29"
+LABEL io.hass.version="2.0.30"
 
 CMD ["/usr/share/alexa-airplay-bridge/entrypoint.sh"]
