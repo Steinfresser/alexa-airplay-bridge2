@@ -70,8 +70,10 @@ RUN autoreconf -fi \
     && make -j$(nproc) \
     && make install DESTDIR=/tmp/install
 
-# Copy the Apple ALAC shared library into the install tree.
-RUN cp /tmp/alac-install/usr/local/lib/libalac.so* /tmp/install/usr/lib/ 2>/dev/null || true
+# Ensure /tmp/install/usr/lib exists, then copy the Apple ALAC library (static or shared).
+RUN mkdir -p /tmp/install/usr/lib \
+    && cp /tmp/alac-install/usr/local/lib/libalac.a /tmp/install/usr/lib/ 2>/dev/null || true \
+    && cp /tmp/alac-install/usr/local/lib/libalac.so* /tmp/install/usr/lib/ 2>/dev/null || true
 
 # ===========================================================================
 # Stage 2 — Runtime image.
@@ -80,7 +82,7 @@ FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
 
 # Copy the compiled shairport-sync binary, Apple ALAC library, and config.
 COPY --from=builder /tmp/install/usr/bin/shairport-sync /usr/bin/shairport-sync
-COPY --from=builder /tmp/install/usr/lib/libalac.so* /usr/lib/
+COPY --from=builder /tmp/install/usr/lib/ /usr/lib/
 COPY --from=builder /tmp/install/etc/shairport-sync.conf.sample /etc/shairport-sync.conf.sample
 
 RUN ldconfig /usr/lib 2>/dev/null || true
