@@ -1,0 +1,89 @@
+name: CI Build Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-build:
+    name: Docker Build (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build add-on image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: BUILD_ARCH=amd64
+          push: false
+          tags: alexa-airplay-bridge:ci
+          load: true
+
+      - name: Validate shairport-sync installed
+        run: |
+          echo "[CI] Verifying shairport-sync is installed and runnable..."
+          docker run --rm alexa-airplay-bridge:ci shairport-sync -V 2>&1 | tee /tmp/shairport-version.txt
+          if [ ! -s /tmp/shairport-version.txt ]; then
+            echo "FAIL: shairport-sync not found or not runnable"
+            exit 1
+          fi
+          echo "[CI] shairport-sync validation passed."
+
+      - name: Validate tinysvcmdns mDNS backend
+        run: |
+          if ! grep -qi 'tinysvcmdns' /tmp/shairport-version.txt; then
+            echo "FAIL: shairport-sync was not compiled with tinysvcmdns"
+            echo "AirPlay discovery will not work without embedded mDNS."
+            exit 1
+          fi
+          echo "[CI] tinysvcmdns validation passed."
+
+      - name: Validate Python syntax
+        run: |
+          docker run --rm --entrypoint python3 alexa-airplay-bridge:ci -m compileall -q /usr/share/alexa-airplay-bridge
+
+  docker-build-aarch64:
+    name: Docker Build (aarch64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build add-on image (aarch64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: BUILD_ARCH=aarch64
+          push: false
+          tags: alexa-airplay-bridge:ci-arm64
+          load: true
+
+      - name: Validate shairport-sync installed (aarch64)
+        run: |
+          docker run --rm alexa-airplay-bridge:ci-arm64 shairport-sync -V 2>&1 | tee /tmp/shairport-version.txt
+          if [ ! -s /tmp/shairport-version.txt ]; then
+            echo "FAIL: shairport-sync not found or not runnable"
+            exit 1
+          fi
+          if ! grep -qi 'tinysvcmdns' /tmp/shairport-version.txt; then
+            echo "FAIL: shairport-sync was not compiled with tinysvcmdns"
+            exit 1
+          fi
+          echo "[CI] aarch64 validation passed."

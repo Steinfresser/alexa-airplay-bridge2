@@ -1,0 +1,10 @@
+{
+  "name": "alexa-airplay-bridge",
+  "version": "2.0.29",
+  "private": true,
+  "description": "AirPlay to Bluetooth Bridge for Home Assistant",
+  "scripts": {
+    "build": "echo 'Home Assistant Add-on — no JS build required' && exit 0",
+    "dev": "echo 'This is a Docker-based Home Assistant Add-on. Run it in HA.' && exit 0"
+  }
+}

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirPlay to Bluetooth Bridge</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="static/css/app.css">
+  <script>
+    (function() {
+      var p = window.location.pathname;
+      if (!p.endsWith('/')) p += '/';
+      window.API_BASE = p;
+    })();
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <!-- Error overlay (shown if JS init fails) -->
+  <div id="errorOverlay" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.85); padding:2rem; overflow:auto;">
+    <div style="max-width:700px; margin:0 auto; background:#1e293b; border:1px solid #dc2626; border-radius:16px; padding:2rem;">
+      <h2 style="color:#f87171; font-size:1.25rem; font-weight:600; margin-bottom:1rem;">UI Initialization Error</h2>
+      <p style="color:#cbd5e1; font-size:0.875rem; margin-bottom:1rem;">The AirPlay Bridge UI failed to load. Copy the diagnostic info below for troubleshooting:</p>
+      <pre id="errorDetail" style="background:#0f172a; border:1px solid #334155; border-radius:8px; padding:1rem; color:#f1f5f9; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:400px; overflow:auto;"></pre>
+      <button id="errorCopyBtn" style="margin-top:1rem; padding:0.5rem 1.5rem; background:#0ea5e9; color:#fff; border:none; border-radius:8px; font-weight:500; cursor:pointer;">Copy to Clipboard</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/40">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 3l12 9-6 5v8l6-5-12-9z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-semibold tracking-tight">AirPlay to Bluetooth Bridge</h1>
+          <p class="text-xs text-slate-400">Dynamic AirPlay receiver &amp; Bluetooth switcher</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+        <span id="statusText" class="text-sm text-slate-400">Connecting…</span>
+      </div>
+    </div>
+    <!-- Tabs -->
+    <nav class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex gap-1 -mb-px">
+        <button data-tab="pairing" class="nav-tab active px-4 py-2.5 text-sm font-medium border-b-2 border-sky-400 text-sky-300 transition-colors">Pairing &amp; Discovery</button>
+        <button data-tab="speakers" class="nav-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">Saved Speakers</button>
+        <button data-tab="diagnostics" class="nav-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">Diagnostics &amp; Debug</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+    <!-- System Overview & Network Topology -->
+    <section id="systemOverview" class="mb-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-slate-950/30">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-5">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">Live system map</p>
+          <h2 class="mt-1 text-xl font-semibold text-slate-100">System Overview &amp; Network Topology</h2>
+          <p class="mt-1 text-sm text-slate-400">Follow audio from the AirPlay source to the active Bluetooth speaker.</p>
+        </div>
+        <span id="overviewUpdated" class="text-xs text-slate-500">Waiting for status…</span>
+      </div>
+      <div class="flex flex-col gap-3 md:flex-row md:items-stretch" id="topologyFlow">
+        <div class="topology-node flex-1"><span class="topology-icon">01</span><div><p class="topology-title">AirPlay Source Device</p><p id="topologySource" class="topology-detail">No active client</p></div><span id="topologySourceBadge" class="status-badge status-idle">IDLE</span></div>
+        <div class="topology-arrow" aria-hidden="true">→</div>
+        <div class="topology-node flex-1"><span class="topology-icon">02</span><div><p class="topology-title">Shairport Receiver</p><p id="topologyReceiver" class="topology-detail">No receiver running</p></div><span id="topologyReceiverBadge" class="status-badge status-idle">IDLE</span></div>
+        <div class="topology-arrow" aria-hidden="true">→</div>
+        <div class="topology-node flex-1"><span class="topology-icon">03</span><div><p class="topology-title">PipeWire Audio Engine</p><p id="topologyEngine" class="topology-detail">Checking audio engine</p></div><span id="topologyEngineBadge" class="status-badge status-buffering">BUFFERING</span></div>
+        <div class="topology-arrow" aria-hidden="true">→</div>
+        <div class="topology-node flex-1"><span class="topology-icon">04</span><div><p class="topology-title">Active Bluetooth Speaker</p><p id="topologySpeaker" class="topology-detail">No connected speaker</p></div><span id="topologySpeakerBadge" class="status-badge status-disconnected">DISCONNECTED</span></div>
+      </div>
+      <div class="mt-5 grid gap-3 border-t border-slate-800 pt-4 lg:grid-cols-2">
+        <div class="rounded-xl bg-slate-950/60 p-4">
+          <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-200">AirPlay Pass-Through</h3><span id="airplayPanelBadge" class="status-badge status-idle">IDLE</span></div>
+          <div class="grid gap-2 text-sm sm:grid-cols-2"><div><p class="text-xs text-slate-500">Receiver name</p><p id="airplayReceiverName" class="text-slate-200">—</p></div><div><p class="text-xs text-slate-500">Listen port</p><p id="airplayListenPort" class="font-mono text-slate-200">—</p></div><div><p class="text-xs text-slate-500">Connected AirPlay client</p><p id="airplayClient" class="truncate text-slate-200">No active client</p></div><div><p class="text-xs text-slate-500">Passed-through target</p><p id="airplayTarget" class="truncate font-mono text-slate-200">—</p></div></div>
+        </div>
+        <div class="rounded-xl bg-slate-950/60 p-4"><div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-200">System Audio</h3><span id="systemAudioBadge" class="status-badge status-idle">IDLE</span></div><div class="grid gap-2 text-sm sm:grid-cols-3"><div><p class="text-xs text-slate-500">Default sink</p><p id="systemDefaultSink" class="truncate font-mono text-slate-200">—</p></div><div><p class="text-xs text-slate-500">Volume</p><p id="systemVolume" class="text-slate-200">—</p></div><div><p class="text-xs text-slate-500">Mute</p><p id="systemMute" class="text-slate-200">—</p></div></div></div>
+      </div>
+      <!-- Now Playing card -->
+      <div class="mt-3 rounded-xl bg-slate-950/60 p-4 border-t border-slate-800 pt-4">
+        <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-200">Now Playing</h3><span id="nowPlayingBadge" class="status-badge status-idle">IDLE</span></div>
+        <div id="nowPlayingContent" class="flex items-center gap-4">
+          <div id="nowPlayingCover" class="w-16 h-16 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p id="nowPlayingTitle" class="font-semibold text-slate-100 truncate">No track playing</p>
+            <p id="nowPlayingArtist" class="text-sm text-slate-400 truncate">—</p>
+            <p id="nowPlayingAlbum" class="text-xs text-slate-500 truncate">—</p>
+          </div>
+          <div class="flex-shrink-0">
+            <span id="nowPlayingStatus" class="text-xs text-slate-500">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 1: Pairing & Discovery -->
+    <section id="tab-pairing" class="tab-content" style="display:block;">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+        <div>
+          <h2 class="text-xl font-semibold">Device Pairing &amp; Discovery</h2>
+          <p class="text-sm text-slate-400 mt-1">Scan for nearby Bluetooth devices and configure them as AirPlay speakers.</p>
+        </div>
+        <button id="btnScan" class="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-medium shadow-lg shadow-sky-900/30 transition-all active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8m0 0l3-3m-3 3l-3-3"/><path d="M2 12h2m16 0h2"/><path d="M12 22v-8m0 0l3 3m-3-3l-3 3"/></svg>
+          <span>Scan for Bluetooth Devices</span>
+        </button>
+      </div>
+
+      <!-- Pairing Mode button + countdown -->
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <button id="btnPairingMode" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-medium shadow-lg shadow-emerald-900/30 transition-all active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8m0 0l3-3m-3 3l-3-3"/><path d="M12 14v8m0 0l3-3m-3 3l-3-3"/></svg>
+          <span>Enable Pairing Mode (3 min)</span>
+        </button>
+        <div id="pairingModeInfo" class="hidden flex items-center gap-3 px-4 py-2.5 rounded-lg bg-emerald-950/50 border border-emerald-700/50">
+          <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+          <span class="text-sm text-emerald-200 font-medium">Pairing Mode Active:</span>
+          <span id="pairingCountdown" class="text-sm text-emerald-300 font-mono">03:00</span>
+        </div>
+      </div>
+
+      <!-- Pairing mode instruction text -->
+      <div id="pairingInstructions" class="hidden mb-4 p-4 rounded-xl bg-slate-900 border border-emerald-700/40">
+        <p class="text-sm text-slate-300">
+          Put your Echo/Speaker into pairing mode or ask <span class="text-emerald-300 font-medium">"Alexa, connect Bluetooth"</span> while the countdown is running.
+          The bridge will auto-accept incoming pairing requests.
+        </p>
+      </div>
+
+      <!-- Scan progress -->
+      <div id="scanProgress" class="hidden mb-4">
+        <div class="flex items-center gap-3 p-4 rounded-xl bg-sky-950/50 border border-sky-800/50">
+          <div class="w-5 h-5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+          <span class="text-sm text-sky-200">Scanning for Bluetooth devices…</span>
+          <span id="scanCountdown" class="ml-auto text-sm text-sky-300 font-mono"></span>
+        </div>
+      </div>
+
+      <!-- Discovered devices -->
+      <div id="scanResults" class="grid gap-3"></div>
+      <div id="scanEmpty" class="text-center py-12 text-slate-500">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 mx-auto mb-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
+        <p>No devices scanned yet. Click the button above to start.</p>
+      </div>
+    </section>
+
+    <!-- TAB 2: Saved Speakers -->
+    <section id="tab-speakers" class="tab-content" style="display:none;">
+      <div class="mb-5">
+        <h2 class="text-xl font-semibold">Saved Speakers</h2>
+        <p class="text-sm text-slate-400 mt-1">Manage your paired AirPlay speakers. Each one appears as a separate AirPlay target on iOS.</p>
+      </div>
+      <div id="speakersList" class="grid gap-3"></div>
+      <div id="speakersEmpty" class="text-center py-12 text-slate-500">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 mx-auto mb-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0118 0v6"/><path d="M21 19a2 2 0 01-2 2h-1v-6h3zM3 19a2 2 0 002 2h1v-6H3z"/></svg>
+        <p>No saved speakers yet. Pair one from the Discovery tab.</p>
+      </div>
+    </section>
+
+    <!-- TAB 3: Diagnostics -->
+    <section id="tab-diagnostics" class="tab-content" style="display:none;">
+      <div class="mb-5">
+        <h2 class="text-xl font-semibold">Advanced Diagnostics &amp; Debugging</h2>
+        <p class="text-sm text-slate-400 mt-1">Real-time system logs, Bluetooth status, audio sinks, and daemon controls.</p>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4 mb-4">
+        <!-- Log Level Toggle -->
+        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">Log Level</h3>
+          <div class="flex gap-2" id="logLevelToggle">
+            <button data-level="INFO" class="log-level-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors">INFO</button>
+            <button data-level="DEBUG" class="log-level-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors">DEBUG</button>
+            <button data-level="TRACE" class="log-level-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors">TRACE</button>
+          </div>
+        </div>
+
+        <!-- Daemon Controls -->
+        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+          <h3 class="text-sm font-semibold text-slate-300 mb-3">Daemon Controls</h3>
+          <div class="flex flex-wrap gap-2">
+            <button id="btnRestartDaemons" class="px-4 py-2 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-500 text-white transition-all active:scale-95">Force Restart Daemons</button>
+            <button id="btnClearLogs" class="px-4 py-2 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all active:scale-95">Clear Logs</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-time Logs -->
+      <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-semibold text-slate-300">Real-Time System Logs</h3>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500">Auto-refresh: 2s</span>
+            <button id="btnCopyLog" class="px-3 py-1 rounded-lg text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white transition-all active:scale-95">Copy System Log</button>
+          </div>
+        </div>
+        <div id="logView" class="h-72 overflow-y-auto p-3 rounded-xl bg-black/60 border border-slate-800 font-mono text-xs leading-relaxed text-slate-400"></div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <!-- Bluetooth Adapter Status -->
+        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-300">Bluetooth Adapter Status</h3>
+            <button id="btnBtStatus" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 transition-colors">Refresh</button>
+          </div>
+          <pre id="btStatusView" class="text-xs font-mono text-slate-400 whitespace-pre-wrap break-all">Click Refresh to load adapter status.</pre>
+        </div>
+
+        <!-- Audio Sinks -->
+        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-300">Active Audio Sinks</h3>
+            <button id="btnSinks" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 transition-colors">Refresh</button>
+          </div>
+          <pre id="sinksView" class="text-xs font-mono text-slate-400 whitespace-pre-wrap break-all">Click Refresh to load audio sinks.</pre>
+        </div>
+
+        <!-- D-Bus Monitor -->
+        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 lg:col-span-2">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-300">Bluetooth D-Bus Monitor</h3>
+            <button id="btnBtEvents" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 transition-colors">Refresh</button>
+          </div>
+          <div id="btEventsView" class="space-y-1.5 max-h-60 overflow-y-auto"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Pair Modal -->
+  <div id="pairModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <h3 class="text-lg font-semibold mb-1">Pair &amp; Configure</h3>
+      <p id="pairModalDesc" class="text-sm text-slate-400 mb-4">Enter a custom AirPlay display name for this speaker.</p>
+      <label class="block text-sm font-medium text-slate-300 mb-1.5">Custom AirPlay Name</label>
+      <input id="pairNameInput" type="text" placeholder="e.g. Wohnzimmer Sound"
+        class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all">
+      <div class="flex gap-3 mt-5">
+        <button id="pairCancel" class="flex-1 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors">Cancel</button>
+        <button id="pairConfirm" class="flex-1 px-4 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-medium transition-colors">Pair &amp; Configure</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="editModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <h3 class="text-lg font-semibold mb-1">Edit Speaker Name</h3>
+      <p class="text-sm text-slate-400 mb-4">Change the AirPlay display name. The AirPlay receiver will restart.</p>
+      <label class="block text-sm font-medium text-slate-300 mb-1.5">Custom AirPlay Name</label>
+      <input id="editNameInput" type="text"
+        class="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all">
+      <div class="flex gap-3 mt-5">
+        <button id="editCancel" class="flex-1 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors">Cancel</button>
+        <button id="editConfirm" class="flex-1 px-4 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-medium transition-colors">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+    <div class="px-5 py-3 rounded-xl shadow-2xl font-medium text-sm" id="toastInner"></div>
+  </div>
+
+  <!-- Version badge -->
+  <div class="fixed bottom-2 left-2 z-40 text-[10px] text-slate-600 font-mono pointer-events-none select-none">v2.0.9</div>
+
+  <script src="static/js/app.js"></script>
+</body>
+</html>

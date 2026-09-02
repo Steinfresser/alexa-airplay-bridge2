@@ -1,0 +1,49 @@
+name: AirPlay to Bluetooth Bridge
+version: 2.0.29
+slug: alexa_airplay_bridge
+description: >-
+  Bridge AirPlay audio from iOS/macOS to Amazon Echo (and other) Bluetooth
+  speakers. Dynamically generates one isolated Shairport-Sync AirPlay receiver
+  per saved speaker, with a real-time D-Bus Bluetooth switcher and an embedded
+  Home Assistant Ingress Web UI for pairing, management, and diagnostics.
+arch:
+  - amd64
+  - aarch64
+init: false
+ingress: true
+ingress_port: 8099
+panel_title: AirPlay Bridge
+host_dbus: true
+bluetooth: true
+audio: true
+host_network: true
+full_access: true
+privileged:
+  - SYS_ADMIN
+  - NET_ADMIN
+  - SYS_NICE
+devices:
+  - /dev/snd
+uart: true
+usb: true
+map:
+  - type: data
+    path: /data
+    read_only: false
+  - type: addon_config
+    path: /config
+    read_only: false
+options:
+  log_level: INFO
+  airplay_port_base: 5000
+  audio_buffer_seconds: 3
+  bluetooth_retry_attempts: 2
+  scan_duration_seconds: 10
+  speaker_db_path: /data/options.json
+schema:
+  log_level: list(INFO|DEBUG|TRACE)
+  airplay_port_base: port
+  audio_buffer_seconds: int(1,10)
+  bluetooth_retry_attempts: int(0,5)
+  scan_duration_seconds: int(5,60)
+  speaker_db_path: str
