@@ -233,6 +233,12 @@ alsa = {{
     audio_backend_latency = {self._buffer_seconds};
 }};
 
+{f'''pa = {{
+    application_name = "{safe_name}";
+    device = "{sink_name}";
+}};
+''' if sink_name else ''}
+
 metadata = {{
     enabled = "yes";
     include_cover_art = "yes";

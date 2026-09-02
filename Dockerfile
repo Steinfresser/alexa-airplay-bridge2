@@ -58,7 +58,7 @@ RUN autoreconf -fi \
        LDFLAGS="-L/tmp/alac-install/usr/local/lib" \
        ./configure \
         --with-alsa \
-        --with-pa \
+        --with-pulseaudio \
         --with-soxr \
         --with-ssl=openssl \
         --with-tinysvcmdns \

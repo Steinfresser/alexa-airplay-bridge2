@@ -55,6 +55,22 @@ for i in $(seq 1 "$A2DP_WAIT_SECONDS"); do
         log "A2DP sink found: ${sink_name} (after ${i}s)"
         break
     fi
+    # If sink not found after 3s, try re-setting the card profile to a2dp_sink.
+    # WirePlumber sometimes drops the A2DP profile and needs a re-trigger.
+    if [ "$i" -eq 3 ]; then
+        log "Sink not found after 3s — re-triggering A2DP profile for ${NEW_MAC}"
+        card_name="$(pactl list cards short 2>/dev/null \
+            | grep -i "${MAC_NORM}" | awk '{print $2}' | head -1)"
+        if [ -n "$card_name" ]; then
+            log "Setting card profile ${card_name} -> a2dp_sink"
+            pactl set-card-profile "$card_name" a2dp_sink 2>&1 \
+                | while read -r line; do log "  $line"; done || true
+            pactl set-card-profile "$card_name" a2dp 2>&1 \
+                | while read -r line; do log "  $line"; done || true
+        else
+            log "No card found for ${NEW_MAC} — device may be disconnected"
+        fi
+    fi
     sleep 1
 done
 
