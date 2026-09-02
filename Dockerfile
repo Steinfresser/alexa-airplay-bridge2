@@ -54,6 +54,7 @@ WORKDIR /tmp/shairport-sync
 RUN autoreconf -fi \
     && PKG_CONFIG_PATH="/tmp/alac-install/usr/local/lib/pkgconfig" \
        CFLAGS="-I/tmp/alac-install/usr/local/include" \
+       CXXFLAGS="-I/tmp/alac-install/usr/local/include" \
        LDFLAGS="-L/tmp/alac-install/usr/local/lib" \
        ./configure \
         --with-alsa \
