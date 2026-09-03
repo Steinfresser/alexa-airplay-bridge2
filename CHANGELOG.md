@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.44 (2026-09-03)
+
+- **Improved BT pairing retry for host-conflict scenarios.** When pairing fails with `ConnectionAttemptFailed`, the bridge now retries up to 3 times with increasing delays (2s, 4s, 6s), removing and rediscovering the device between attempts. This gives BlueZ time to reset stale profile state left by the host sound server.
+- **Throttled host conflict warning** to once per 60 seconds instead of every watchdog cycle.
+
 ## 2.0.43 (2026-09-03)
 
 - **Switched shairport-sync from ALSA to PulseAudio backend.** The ALSA backend sent audio to `auto_null` (the dummy soundcard) because it ignores `PULSE_SERVER`/`PIPEWIRE_NODE` env vars. Now uses `--output=pa` with an explicit `pa = { server=...; sink=...; }` config block that routes audio directly through PipeWire-pulse to the Bluetooth A2DP sink.

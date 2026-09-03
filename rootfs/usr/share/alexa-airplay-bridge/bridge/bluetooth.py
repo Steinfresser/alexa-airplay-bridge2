@@ -992,12 +992,18 @@ class BluetoothManager:
                 return False
             ok, err = self._dbus_call(path, _DEVICE_IFACE, "Pair", timeout=30)
 
-        # Retry once on ConnectionAttemptFailed after a brief wait —
-        # the device may not have been ready for pairing.
-        if not ok and "ConnectionAttemptFailed" in (err or ""):
-            _LOG.info("[BT] Pair %s -> ConnectionAttemptFailed, waiting 2s and retrying", mac)
-            time.sleep(2.0)
-            # Re-resolve path in case it changed.
+        # Retry on ConnectionAttemptFailed with increasing delays.
+        # This often happens when the host sound server holds a stale A2DP
+        # profile or when the device needs time to reset after RemoveDevice.
+        for attempt, delay in enumerate((2, 4, 6), start=1):
+            if ok or "ConnectionAttemptFailed" not in (err or ""):
+                break
+            _LOG.info("[BT] Pair %s -> ConnectionAttemptFailed, attempt %d: "
+                      "removing device, waiting %ds, retrying", mac, attempt, delay)
+            self._remove_device_from_adapter(mac)
+            time.sleep(delay)
+            if not self._rediscover_device_path(mac):
+                continue
             path = self._resolve_device_path(mac)
             if path is not None:
                 ok, err = self._dbus_call(path, _DEVICE_IFACE, "Pair", timeout=30)

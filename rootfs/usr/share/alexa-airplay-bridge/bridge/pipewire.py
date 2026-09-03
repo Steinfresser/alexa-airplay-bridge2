@@ -118,6 +118,8 @@ class PipeWireManager:
                 pass
         return "\n".join(lines)
 
+    _host_conflict_warned: float = 0.0
+
     def check_host_audio_conflict(self) -> bool:
         """Check if the host sound server is blocking our BT profile registration."""
         log_path = os.path.join(self._runtime_dir, "pipewire-daemons.log")
@@ -127,14 +129,18 @@ class PipeWireManager:
         except OSError:
             return False
         if "RegisterProfile() failed: org.bluez.Error.NotPermitted" in content:
-            _LOG.warning(
-                "[PipeWire] HOST AUDIO CONFLICT DETECTED: Another sound server on "
-                "the host (PipeWire, PulseAudio, or bluez-alsa) has already registered "
-                "the Bluetooth A2DP profile. Our container's PipeWire cannot own the "
-                "Bluetooth transport. Audio will NOT reach the speaker. "
-                "FIX: Stop the host sound server (e.g. 'systemctl --user stop "
-                "pipewire pipewire-pulse wireplumber pulseaudio') then restart this add-on."
-            )
+            now = time.time()
+            if now - self._host_conflict_warned >= 60:
+                self._host_conflict_warned = now
+                _LOG.warning(
+                    "[PipeWire] HOST AUDIO CONFLICT DETECTED: Another sound server "
+                    "on the host (PipeWire, PulseAudio, or bluez-alsa) has already "
+                    "registered the Bluetooth A2DP profile. Our container's PipeWire "
+                    "cannot own the Bluetooth transport. Audio will NOT reach the "
+                    "speaker. FIX: Stop the host sound server (e.g. 'systemctl "
+                    "--user stop pipewire pipewire-pulse wireplumber pulseaudio') "
+                    "then restart this add-on."
+                )
             return True
         return False
 
