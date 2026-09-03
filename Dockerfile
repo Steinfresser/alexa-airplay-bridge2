@@ -147,6 +147,6 @@ LABEL io.hass.name="AirPlay to Bluetooth Bridge"
 LABEL io.hass.description="Bridge AirPlay audio to Amazon Echo Bluetooth speakers"
 LABEL io.hass.arch="amd64,aarch64"
 LABEL io.hass.type="addon"
-LABEL io.hass.version="2.0.46"
+LABEL io.hass.version="2.0.47"
 
 CMD ["/usr/share/alexa-airplay-bridge/entrypoint.sh"]

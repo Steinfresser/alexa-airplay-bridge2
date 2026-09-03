@@ -736,6 +736,21 @@ sessioncontrol = {{
                 with self._lock:
                     self._sink_failed.add(mac)
                 _LOG.warning("[Shairport] A2DP sink for %s never appeared — deferring until BT reconnect", mac)
+                # Last-resort fallback: start shairport with whatever sink is
+                # available so at least the AirPlay receiver is visible and
+                # ready. If BT reconnects later, the monitor will restart with
+                # the proper A2DP sink.
+                if self._pipewire is not None:
+                    fallback_sink = self._pipewire.find_any_usable_sink()
+                    if fallback_sink:
+                        _LOG.info("[Shairport] Starting %s with fallback sink %s (A2DP never appeared)", mac, fallback_sink)
+                        with self._lock:
+                            entry = self._speakers.get(mac)
+                        if entry is not None:
+                            speaker, index = entry
+                            self.start_instance(speaker, index, sink_name=fallback_sink)
+                    else:
+                        _LOG.warning("[Shairport] No usable sink at all for %s — shairport will not start until BT reconnect", mac)
         finally:
             with self._lock:
                 self._starting.discard(mac)

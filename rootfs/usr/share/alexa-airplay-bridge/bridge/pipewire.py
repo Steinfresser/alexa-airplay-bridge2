@@ -81,13 +81,16 @@ class PipeWireManager:
 
     def start(self) -> bool:
         if self._ha_audio:
-            _LOG.info("[PipeWire] HA audio mode — no local daemons to start")
+            _LOG.info("[PipeWire] HA audio mode — checking HA PulseAudio reachability")
             code, out = self._run_cmd_env(["pactl", "info"], timeout=5)
             if code == 0:
                 _LOG.info("[PipeWire] HA PulseAudio reachable:\n%s", out.strip()[:500])
-            else:
-                _LOG.warning("[PipeWire] Cannot reach HA PulseAudio: %s", out.strip()[:200])
-            return code == 0
+                return True
+            _LOG.warning("[PipeWire] HA PulseAudio not reachable: %s", out.strip()[:200])
+            _LOG.warning("[PipeWire] Falling back to standalone PipeWire mode")
+            self._ha_audio = False
+            os.environ.pop("PULSE_SERVER", None)
+            os.environ.pop("HA_AUDIO_MODE", None)
 
         with self._lock:
             os.makedirs(self._runtime_dir, exist_ok=True)
@@ -522,6 +525,52 @@ class PipeWireManager:
                             return parts[1]
 
         _LOG.debug("[PipeWire] No A2DP sink found for %s", mac)
+        fallback = self.find_any_bluetooth_sink()
+        if fallback:
+            _LOG.info("[PipeWire] MAC-specific sink not found for %s, using any bluez sink: %s", mac, fallback)
+            return fallback
+        return None
+
+    def find_any_bluetooth_sink(self) -> Optional[str]:
+        """Return any bluez_sink.* that is not auto_null, or None.
+
+        Fallback for MAC-format mismatches or when the sink name doesn't
+        contain the MAC in any expected format.
+        """
+        out = self.list_sinks()
+        for line in out.splitlines():
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+            line_lower = line_stripped.lower()
+            if "bluez_sink" in line_lower or "bluez_output" in line_lower:
+                parts = line_stripped.split()
+                if len(parts) >= 2:
+                    return parts[1]
+        return None
+
+    def find_any_usable_sink(self) -> Optional[str]:
+        """Return the best available sink: first bluez, then any non-auto_null, then auto_null.
+
+        Used as a last-resort fallback when no Bluetooth sink can be found.
+        """
+        sink = self.find_any_bluetooth_sink()
+        if sink:
+            return sink
+        out = self.list_sinks()
+        for line in out.splitlines():
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+            parts = line_stripped.split()
+            if len(parts) >= 2 and parts[1] != "auto_null":
+                return parts[1]
+        # Absolute last resort: auto_null (dummy sink — audio goes nowhere,
+        # but at least the process starts and doesn't crash).
+        for line in out.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                return parts[1]
         return None
 
     def get_default_sink(self) -> Optional[str]:
@@ -669,9 +718,12 @@ class PipeWireManager:
             sink = self.get_default_sink()
             _LOG.info("[PipeWire] [TEST] Falling back to default sink: %s", sink)
         if sink is None or sink == "auto_null":
-            _LOG.error("[PipeWire] [TEST] No usable sink for %s (sink=%s). "
-                       "The A2DP node has likely been removed by WirePlumber.", mac, sink)
-            return False
+            _LOG.warning("[PipeWire] [TEST] No BT/default sink for %s — trying any usable sink", mac)
+            sink = self.find_any_usable_sink()
+            if sink is None:
+                _LOG.error("[PipeWire] [TEST] No usable sink at all for %s — cannot play test sound", mac)
+                return False
+            _LOG.info("[PipeWire] [TEST] Using fallback sink: %s", sink)
 
         # Unmute and set volume to 100% before playing.
         self._run_cmd_env(["pactl", "set-sink-mute", sink, "0"])

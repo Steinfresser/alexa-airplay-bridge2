@@ -114,15 +114,40 @@ if [ -n "$sink_name" ]; then
     done
     log "Audio routing complete for ${AIRPLAY_NAME} (${NEW_MAC})"
 else
-    log "WARNING: A2DP sink for ${NEW_MAC} not found after ${A2DP_WAIT_SECONDS}s — audio may route to default output"
+    log "WARNING: A2DP sink for ${NEW_MAC} not found after ${A2DP_WAIT_SECONDS}s — trying fallbacks"
     # Dump pactl state for debugging.
     log "Available sinks:"
     pactl list sinks short 2>&1 | while read -r line; do log "  $line"; done
+
+    # Fallback 1: any bluez sink (MAC format mismatch).
     fallback_sink="$(pactl list sinks short 2>/dev/null \
         | grep -i bluez | awk '{print $2}' | head -1)"
     if [ -n "$fallback_sink" ]; then
         log "Using fallback bluez sink: ${fallback_sink}"
         pactl set-default-sink "$fallback_sink" 2>&1 | while read -r line; do log "  $line"; done
+        pactl set-sink-mute "$fallback_sink" 0 2>&1 | while read -r line; do log "  $line"; done
+        pactl set-sink-volume "$fallback_sink" 100% 2>&1 | while read -r line; do log "  $line"; done
+    else
+        # Fallback 2: any non-auto_null sink.
+        fallback_sink="$(pactl list sinks short 2>/dev/null \
+            | grep -v auto_null | awk '{print $2}' | head -1)"
+        if [ -n "$fallback_sink" ]; then
+            log "Using fallback non-auto_null sink: ${fallback_sink}"
+            pactl set-default-sink "$fallback_sink" 2>&1 | while read -r line; do log "  $line"; done
+            pactl set-sink-mute "$fallback_sink" 0 2>&1 | while read -r line; do log "  $line"; done
+            pactl set-sink-volume "$fallback_sink" 100% 2>&1 | while read -r line; do log "  $line"; done
+        else
+            # Fallback 3: auto_null (dummy — audio goes nowhere, but shairport
+            # won't crash and can be restarted later when the real sink appears).
+            fallback_sink="$(pactl list sinks short 2>/dev/null \
+                | awk '{print $2}' | head -1)"
+            if [ -n "$fallback_sink" ]; then
+                log "Last-resort fallback sink: ${fallback_sink} (audio may not reach speaker)"
+                pactl set-default-sink "$fallback_sink" 2>&1 | while read -r line; do log "  $line"; done
+            else
+                log "ERROR: No sinks available at all — audio will not play"
+            fi
+        fi
     fi
 fi
 

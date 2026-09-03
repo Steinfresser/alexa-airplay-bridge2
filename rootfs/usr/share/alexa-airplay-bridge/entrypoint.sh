@@ -98,7 +98,8 @@ if [ -n "${PULSE_SERVER:-}" ]; then
         HA_AUDIO="yes"
         echo "[entrypoint] HA audio detected (PULSE_SERVER=${PULSE_SERVER}) — using HA PulseAudio, skipping own PipeWire."
     else
-        echo "[entrypoint] PULSE_SERVER set but not reachable — will start own PipeWire."
+        echo "[entrypoint] PULSE_SERVER set but not reachable — will try probing socket locations."
+        unset PULSE_SERVER
     fi
 fi
 

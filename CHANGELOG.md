@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.47 (2026-09-03)
+
+- **Multi-layer audio fallbacks added.** If the primary audio path fails at any stage, the bridge now cascades through fallbacks so audio reaches the speaker in as many scenarios as possible:
+  1. **HA PulseAudio unreachable → standalone PipeWire**: `pipewire.py start()` now falls back to launching its own PipeWire/WirePlumber/pipewire-pulse daemons if the HA PulseAudio server is set but not reachable, instead of returning failure.
+  2. **MAC-specific sink not found → any bluez sink**: `find_bluetooth_sink()` now calls `find_any_bluetooth_sink()` as a fallback when the MAC-formatted sink name doesn't match, catching MAC format mismatches between BlueZ and PipeWire.
+  3. **No bluez sink at all → any non-auto_null sink → auto_null**: New `find_any_usable_sink()` method returns the best available sink at each level, used as a last resort by both `play_test_sound()` and the shairport sink-polling thread.
+  4. **A2DP sink never appears → start shairport with fallback sink**: `_poll_for_sink_and_start()` now starts shairport-sync with whatever sink is available (even auto_null) after all A2DP polling and profile-switch retries fail, so the AirPlay receiver is at least visible and ready for a BT reconnect restart.
+  5. **`bt_switch.sh` broader fallback**: When the MAC-specific A2DP sink is not found, the script now cascades: any bluez sink → any non-auto_null sink → auto_null (last resort), instead of only trying bluez sinks.
+  6. **Test sound plays to any sink**: `play_test_sound()` no longer refuses to play when only auto_null is available — it tries it as a last resort and logs a warning, instead of returning failure.
+
 ## 2.0.46 (2026-09-03)
 
 - **Fixed host audio conflict on HAOS — uses HA PulseAudio instead of own PipeWire.** When the Home Assistant supervisor provides `PULSE_SERVER` (add-ons with `audio: true`), the bridge now detects it at startup and skips launching its own PipeWire/WirePlumber/pipewire-pulse daemons. All audio commands (`pactl`, shairport-sync, test tones) route through the HA PulseAudio server instead. This eliminates the `RegisterProfile() failed: org.bluez.Error.NotPermitted` conflict where the add-on's PipeWire and `hassio_audio` fought over the Bluetooth A2DP transport. The entrypoint no longer kills `pulseaudio`/`bluealsa` when HA audio is active. Standalone (non-HAOS) deployments still start their own PipeWire stack as before.
