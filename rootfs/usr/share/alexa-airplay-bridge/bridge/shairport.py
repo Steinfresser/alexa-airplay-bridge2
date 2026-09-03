@@ -409,6 +409,10 @@ sessioncontrol = {{
                 ha_pulse = os.environ.get("PULSE_SERVER", "")
                 if ha_pulse:
                     # HA audio mode: keep supervisor-provided PULSE_SERVER.
+                    # Do NOT set XDG_RUNTIME_DIR or PULSE_RUNTIME_PATH — those
+                    # point to our own PipeWire runtime and would make
+                    # shairport-sync connect to our (non-existent)
+                    # pipewire-pulse instead of the host's PulseAudio.
                     pass
                 else:
                     env["PULSE_SERVER"] = f"unix:{self._runtime_dir}/pulse/native"

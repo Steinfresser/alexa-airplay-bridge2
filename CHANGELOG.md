@@ -3,6 +3,9 @@
 ## 2.0.46 (2026-09-03)
 
 - **Fixed host audio conflict on HAOS — uses HA PulseAudio instead of own PipeWire.** When the Home Assistant supervisor provides `PULSE_SERVER` (add-ons with `audio: true`), the bridge now detects it at startup and skips launching its own PipeWire/WirePlumber/pipewire-pulse daemons. All audio commands (`pactl`, shairport-sync, test tones) route through the HA PulseAudio server instead. This eliminates the `RegisterProfile() failed: org.bluez.Error.NotPermitted` conflict where the add-on's PipeWire and `hassio_audio` fought over the Bluetooth A2DP transport. The entrypoint no longer kills `pulseaudio`/`bluealsa` when HA audio is active. Standalone (non-HAOS) deployments still start their own PipeWire stack as before.
+- **Fixed `bt_switch.sh` crash: `log: command not found`.** The `log` function was defined after its first call, causing the audio-switching hook to fail silently on every AirPlay stream start. Moved the function definition before its first use.
+- **Fixed `bt_switch.sh` connecting to wrong PulseAudio server.** In HA audio mode the script still set `PULSE_SERVER` to the container's own pipewire-pulse socket, so it only saw the `auto_null` dummy sink and could not route audio to the Bluetooth speaker. Now respects the supervisor-provided `PULSE_SERVER`.
+- **Fixed `shairport.py` overriding PULSE_SERVER in HA audio mode.** The shairport env setup unconditionally set `XDG_RUNTIME_DIR` and `PULSE_RUNTIME_PATH` to the container's PipeWire runtime, which confused `pactl` into connecting to the non-existent pipewire-pulse instead of the host's PulseAudio. Now skips those overrides when HA audio is active.
 
 ## 2.0.45 (2026-09-03)
 

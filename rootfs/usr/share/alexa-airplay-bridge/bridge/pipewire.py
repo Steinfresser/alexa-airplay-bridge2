@@ -37,8 +37,21 @@ class PipeWireManager:
         self._keepalive_procs: dict[str, subprocess.Popen] = {}
 
         # Detect Home Assistant audio infrastructure.
+        # The entrypoint probes common HA PulseAudio socket paths and sets
+        # PULSE_SERVER + HA_AUDIO_MODE when it finds a reachable host server.
         ha_pulse = os.environ.get("PULSE_SERVER", "")
-        self._ha_audio = bool(ha_pulse)
+        self._ha_audio = bool(ha_pulse) or os.environ.get("HA_AUDIO_MODE") == "1"
+        if self._ha_audio and not ha_pulse:
+            # entrypoint set HA_AUDIO_MODE but not PULSE_SERVER — probe again.
+            for candidate in (
+                "/mnt/data/supervisor/pulse/default.sock",
+                "/run/pulse/native",
+                "/var/run/pulse/native",
+            ):
+                if os.path.exists(candidate):
+                    ha_pulse = f"unix:{candidate}"
+                    os.environ["PULSE_SERVER"] = ha_pulse
+                    break
         if self._ha_audio:
             _LOG.info("[PipeWire] HA audio detected (PULSE_SERVER=%s) — using HA PulseAudio, skipping own PipeWire", ha_pulse)
 
@@ -51,7 +64,11 @@ class PipeWireManager:
     def env(self) -> dict[str, str]:
         env = os.environ.copy()
         if self._ha_audio:
-            # Keep the supervisor-provided PULSE_SERVER; don't override it.
+            # HA audio mode: use the host's PulseAudio server.  PULSE_SERVER
+            # was set by the entrypoint (or by __init__ probing).  Do NOT set
+            # XDG_RUNTIME_DIR or PULSE_RUNTIME_PATH — those point to our own
+            # PipeWire runtime and would confuse pactl into connecting to
+            # our (non-existent) pipewire-pulse instead of the host's.
             return env
         env["XDG_RUNTIME_DIR"] = self._runtime_dir
         env["PIPEWIRE_RUNTIME_DIR"] = self._runtime_dir
@@ -151,7 +168,13 @@ class PipeWireManager:
     _host_conflict_warned: float = 0.0
 
     def check_host_audio_conflict(self) -> bool:
-        """Check if the host sound server is blocking our BT profile registration."""
+        """Check if the host sound server is blocking our BT profile registration.
+
+        In HA audio mode this is a no-op — we are a client of the host sound
+        server, so there is no conflict to detect.
+        """
+        if self._ha_audio:
+            return False
         log_path = os.path.join(self._runtime_dir, "pipewire-daemons.log")
         try:
             with open(log_path, "r", encoding="utf-8", errors="replace") as fh:

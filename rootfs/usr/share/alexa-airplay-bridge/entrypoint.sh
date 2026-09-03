@@ -76,16 +76,57 @@ fi
 export XDG_CONFIG_DIRS="/etc"
 
 # ---------------------------------------------------------------------------
-# Kill competing Bluetooth audio services — but NOT when using HA audio.
+# Detect Home Assistant audio infrastructure.
 #
-# On HAOS the supervisor sets PULSE_SERVER for add-ons with audio: true.
-# In that case hassio_audio owns the BT transport and we must not kill it.
+# On HAOS the supervisor runs a PulseAudio server ("hassio_audio") for add-ons
+# with audio: true.  It sets PULSE_SERVER to a socket path.  When that server
+# is reachable, it already owns the Bluetooth A2DP profile — our container's
+# own PipeWire/WirePlumber cannot compete (RegisterProfile() fails with
+# org.bluez.Error.NotPermitted).  In that case we skip our own PipeWire stack
+# entirely and route all audio through the HA PulseAudio server.
+#
+# We also probe common HA PulseAudio socket locations in case the supervisor
+# did not export PULSE_SERVER but the socket still exists.
 # ---------------------------------------------------------------------------
+HA_AUDIO="no"
+
+# Try the supervisor-provided PULSE_SERVER first.
 if [ -n "${PULSE_SERVER:-}" ]; then
-    echo "[entrypoint] HA audio detected (PULSE_SERVER=${PULSE_SERVER}) — skipping local audio service cleanup."
+    # Strip "unix:" prefix for socket existence check.
+    _SOCKET="${PULSE_SERVER#unix:}"
+    if [ -S "$_SOCKET" ] || pactl --server "$PULSE_SERVER" info >/dev/null 2>&1; then
+        HA_AUDIO="yes"
+        echo "[entrypoint] HA audio detected (PULSE_SERVER=${PULSE_SERVER}) — using HA PulseAudio, skipping own PipeWire."
+    else
+        echo "[entrypoint] PULSE_SERVER set but not reachable — will start own PipeWire."
+    fi
+fi
+
+# Probe common HA PulseAudio socket locations.
+if [ "$HA_AUDIO" = "no" ]; then
+    for _CANDIDATE in \
+        "/mnt/data/supervisor/pulse/default.sock" \
+        "/run/pulse/native" \
+        "/var/run/pulse/native"; do
+        if [ -S "$_CANDIDATE" ] && pactl --server "unix:$_CANDIDATE" info >/dev/null 2>&1; then
+            HA_AUDIO="yes"
+            export PULSE_SERVER="unix:$_CANDIDATE"
+            echo "[entrypoint] HA PulseAudio found at ${_CANDIDATE} — using HA audio, skipping own PipeWire."
+            break
+        fi
+    done
+fi
+
+if [ "$HA_AUDIO" = "yes" ]; then
+    # Do NOT kill hassio_audio or bluealsa — the host owns the BT transport.
+    echo "[entrypoint] HA audio mode — skipping local audio service cleanup."
+    export HA_AUDIO_MODE="1"
 else
+    # Standalone mode — kill any competing sound servers, then let run.py
+    # start our own PipeWire/WirePlumber/pipewire-pulse.
     killall pulseaudio bluealsa 2>/dev/null || true
     sleep 0.2
+    echo "[entrypoint] Standalone mode — will start own PipeWire stack."
 fi
 
 echo "[entrypoint] Configuration complete — starting bridge."

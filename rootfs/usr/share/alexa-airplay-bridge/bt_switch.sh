@@ -21,9 +21,14 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-/data/pipewire}"
 PULSE_SOCKET="${RUNTIME_DIR}/pulse/native"
 A2DP_WAIT_SECONDS=10
 
+log() {
+    echo "${LOG_TAG} $(date '+%H:%M:%S') $*" | tee -a "${DATA_DIR}/bridge.log" 2>/dev/null || echo "${LOG_TAG} $*"
+}
+
 # Export PipeWire/PulseAudio env vars so pactl finds the right server.
-# If the HA supervisor set PULSE_SERVER (audio: true), use that instead of
-# our own PipeWire socket — avoids A2DP profile conflict with hassio_audio.
+# If the HA supervisor set PULSE_SERVER (audio: true), or the entrypoint
+# detected the HA PulseAudio socket, use that — avoids A2DP profile conflict
+# with hassio_audio.
 if [ -n "${PULSE_SERVER:-}" ]; then
     log "Using HA audio (PULSE_SERVER=${PULSE_SERVER})"
     export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${RUNTIME_DIR}/bus}"
@@ -33,10 +38,6 @@ else
     export PULSE_RUNTIME_PATH="${RUNTIME_DIR}/pulse"
     export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${RUNTIME_DIR}/bus}"
 fi
-
-log() {
-    echo "${LOG_TAG} $(date '+%H:%M:%S') $*" | tee -a "${DATA_DIR}/bridge.log" 2>/dev/null || echo "${LOG_TAG} $*"
-}
 
 if [ "$MODE" = "exit" ]; then
     log "Stream exit for ${AIRPLAY_NAME} (${NEW_MAC}) — keeping Bluetooth link alive"
