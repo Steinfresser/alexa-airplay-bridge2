@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.45 (2026-09-03)
+
+- **Reverted shairport-sync back to ALSA backend.** The `pa` (PulseAudio) output backend is not available in this shairport-sync build despite PulseAudio appearing in the version string. Audio routing now works via ALSA -> `alsa-plugins-pulse` -> PipeWire (the `asound.conf` routes ALSA's default device through the PulseAudio plugin). The `PULSE_SERVER` and `PIPEWIRE_NODE` env vars (already set) direct audio to the correct Bluetooth sink.
+
 ## 2.0.44 (2026-09-03)
 
 - **Improved BT pairing retry for host-conflict scenarios.** When pairing fails with `ConnectionAttemptFailed`, the bridge now retries up to 3 times with increasing delays (2s, 4s, 6s), removing and rediscovering the device between attempts. This gives BlueZ time to reset stale profile state left by the host sound server.
