@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.42 (2026-09-03)
+
+- **ROOT CAUSE: PulseAudio stole the Bluetooth A2DP transport from PipeWire.** The `pulseaudio` package was installed alongside PipeWire. PulseAudio registered the A2DP sink profile with BlueZ first, so PipeWire got "RegisterProfile() failed: org.bluez.Error.NotPermitted". PipeWire created a BT sink node, but no transport backed it -- all audio was silently discarded. Removed `pulseaudio` from the Docker image. Added safety `killall pulseaudio bluealsa` in entrypoint.
+- **Fixed env mutation**: `play_test_sound` permanently mutated `self.env` by setting PIPEWIRE_NODE on the shared dict. Now uses a copy.
+
 ## 2.0.41 (2026-09-03)
 
 - **CRITICAL FIX: shairport-sync crash on startup** — v2.0.40 set the ALSA `output_device` to the PipeWire sink name (e.g. `bluez_sink.AC_EF_92_...`), but shairport-sync's ALSA backend can only open ALSA device names ("default", "hw:0,0"). This caused `error -2 ("No such file or directory")` and a fatal crash. Reverted to `output_device = "default"` and rely on `PIPEWIRE_NODE` env var + default sink routing instead.

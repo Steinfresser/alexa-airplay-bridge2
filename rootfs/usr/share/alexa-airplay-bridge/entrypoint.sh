@@ -75,5 +75,18 @@ fi
 # ---------------------------------------------------------------------------
 export XDG_CONFIG_DIRS="/etc"
 
+# ---------------------------------------------------------------------------
+# Kill any competing Bluetooth audio services.
+#
+# PulseAudio, bluez-alsa, or other sound servers may register the A2DP sink
+# profile with BlueZ before PipeWire starts.  When that happens, PipeWire
+# gets "RegisterProfile() failed: org.bluez.Error.NotPermitted" and creates
+# a BT sink node that is never backed by a real transport — audio is silently
+# discarded.  Killing these before PipeWire starts ensures PipeWire is the
+# sole owner of the Bluetooth audio transport.
+# ---------------------------------------------------------------------------
+killall pulseaudio bluealsa 2>/dev/null || true
+sleep 0.2
+
 echo "[entrypoint] Configuration complete — starting bridge."
 exec python3 /usr/share/alexa-airplay-bridge/run.py

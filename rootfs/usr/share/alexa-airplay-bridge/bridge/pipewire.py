@@ -598,9 +598,7 @@ class PipeWireManager:
 
         _LOG.info("[PipeWire] Playing test sound to %s (sink=%s, file=%s)", mac, sink, test_file)
 
-        pw_env = self.env
-        pw_env["PULSE_SERVER"] = pulse_server
-        pw_env["PIPEWIRE_NODE"] = sink
+        pw_env = {**self.env, "PULSE_SERVER": pulse_server, "PIPEWIRE_NODE": sink}
 
         # Log sink state right before playback.
         code_state, state_out = self._run_cmd_env(
