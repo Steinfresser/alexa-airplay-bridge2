@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.39 (2026-09-03)
+
+- **Fixed AirPlay metadata display (track title, artist, album never shown)**: The metadata reader was creating a FIFO at a different path than shairport-sync was writing to. Shairport-sync wrote to its default pipe `/tmp/shairport-sync-metadata`, but the reader listened on a per-speaker FIFO in the runtime dir. Now the shairport-sync config explicitly sets `pipe_name` to the per-speaker FIFO path. Additionally, replaced the broken text-based pipe parser (shairport-sync writes binary metadata, not `key=value` lines) with a D-Bus poller that reads Title/Artist/Album from shairport-sync's native `org.gnome.ShairportSync` D-Bus interface every 3 seconds. The pipe is still used as a secondary signal to detect playback start.
+
 ## 2.0.38 (2026-09-03)
 
 - **Fixed broken sink keepalive (was silently exiting immediately)**: The `pacat` keepalive process in 2.0.37 was started with `stdin=DEVNULL` and `/dev/zero` as a positional argument. `pacat` reads from stdin, not from a file argument, so it received zero bytes and exited instantly — the sink had no protection against WirePlumber removal. Now `/dev/zero` is opened as a file descriptor and piped to `pacat`'s stdin, creating a genuine continuous silence stream. A monitor thread logs if the keepalive ever exits unexpectedly.

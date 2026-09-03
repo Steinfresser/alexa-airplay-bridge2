@@ -100,73 +100,129 @@ class ShairportManager:
         """Return the FIFO path for shairport-sync metadata output."""
         return os.path.join(self._runtime_dir, f"metadata-{mac.replace(':', '')}.fifo")
 
-    def _start_metadata_reader(self, mac: str) -> None:
-        """Start a background thread reading shairport-sync metadata pipe.
-
-        Shairport-sync writes metadata as line-based key=value pairs to a
-        named pipe. We parse track title, artist, album, and cover art
-        and cache them for the Now Playing display.
-        """
+    def _ensure_metadata_pipe(self, mac: str) -> None:
+        """Create the metadata FIFO if it doesn't already exist."""
         pipe_path = self._metadata_pipe_path(mac)
         try:
-            if os.path.exists(pipe_path):
+            if os.path.exists(pipe_path) and not os.path.isdir(pipe_path):
+                st = os.stat(pipe_path)
+                import stat
+                if stat.S_ISFIFO(st.st_mode):
+                    return
                 os.remove(pipe_path)
             os.makedirs(os.path.dirname(pipe_path), exist_ok=True)
             os.mkfifo(pipe_path)
+            _LOG.info("[Shairport] Created metadata FIFO for %s at %s", mac, pipe_path)
         except OSError as exc:
-            _LOG.debug("[Shairport] Could not create metadata pipe for %s: %s", mac, exc)
-            return
+            _LOG.warning("[Shairport] Could not create metadata FIFO for %s: %s", mac, exc)
 
-        def _reader() -> None:
+    def _start_metadata_reader(self, mac: str) -> None:
+        """Start a background thread that polls shairport-sync D-Bus for metadata.
+
+        Shairport-sync exposes track metadata (title, artist, album, cover art
+        URL) via its native D-Bus interface at org.gnome.ShairportSync on the
+        session bus. We poll the RemoteControlService properties every 3 seconds
+        while the process is running. This is more reliable than parsing the
+        binary metadata pipe.
+
+        As a fallback, also reads the metadata FIFO (binary format) for the
+        Active state signal — the pipe always receives something when playback
+        starts, which we use to mark the speaker as "playing".
+        """
+        pipe_path = self._metadata_pipe_path(mac)
+
+        def _dbus_poll() -> None:
+            _LOG.info("[Shairport] Metadata D-Bus poller started for %s", mac)
+            while True:
+                with self._lock:
+                    proc = self._processes.get(mac)
+                if proc is None or proc.poll() is not None:
+                    break
+                try:
+                    meta = self._read_dbus_metadata()
+                    if meta:
+                        with self._lock:
+                            existing = self._now_playing.get(mac, {})
+                            if meta.get("title") or meta.get("artist"):
+                                existing.update(meta)
+                                existing["status"] = "playing"
+                                self._now_playing[mac] = existing
+                                if self._bt is not None:
+                                    try:
+                                        self._bt.update_mpris_metadata(
+                                            mac,
+                                            existing.get("title", ""),
+                                            existing.get("artist", ""),
+                                            existing.get("album", ""),
+                                        )
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                except Exception as exc:  # noqa: BLE001
+                    _LOG.debug("[Shairport] D-Bus metadata poll error for %s: %s", mac, exc)
+                time.sleep(3)
+            _LOG.info("[Shairport] Metadata D-Bus poller ended for %s", mac)
+
+        def _pipe_reader() -> None:
+            """Read the metadata pipe to detect playback start/stop."""
             try:
-                with open(pipe_path, "r", encoding="utf-8", errors="replace") as fh:
-                    title = artist = album = cover = ""
-                    for line in iter(fh.readline, ""):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if line.startswith("item_type="):
-                            continue
-                        if line.startswith("item_value="):
-                            value = line[len("item_value="):].strip().strip('"')
-                            if not value:
-                                continue
-                            # Heuristic: shairport sends metadata in chunks;
-                            # we collect the most recent non-empty values.
-                            if not title:
-                                title = value
-                            elif not artist:
-                                artist = value
-                            elif not album:
-                                album = value
-                            elif not cover:
-                                cover = value
-                            with self._lock:
-                                self._now_playing[mac] = {
-                                    "title": title,
-                                    "artist": artist,
-                                    "album": album,
-                                    "cover_art": cover,
-                                    "status": "playing",
-                                }
-                            # Forward to Bluetooth MPRIS/AVRCP if available.
-                            if self._bt is not None:
-                                try:
-                                    self._bt.update_mpris_metadata(mac, title, artist, album)
-                                except Exception:  # noqa: BLE001
-                                    pass
-                            # Reset for next track.
-                            if title and artist and album:
-                                title = artist = album = cover = ""
+                with open(pipe_path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(4096)
+                        if not chunk:
+                            break
+                        with self._lock:
+                            if mac not in self._now_playing:
+                                self._now_playing[mac] = {"status": "playing"}
+                            else:
+                                self._now_playing[mac]["status"] = "playing"
             except OSError:
                 pass
-            except Exception as exc:  # noqa: BLE001
-                _LOG.debug("[Shairport] Metadata reader for %s stopped: %s", mac, exc)
 
-        thread = threading.Thread(target=_reader, daemon=True, name=f"metadata-{mac.replace(':', '')}")
-        thread.start()
+        t1 = threading.Thread(target=_dbus_poll, daemon=True,
+                              name=f"metadata-dbus-{mac.replace(':', '')}")
+        t1.start()
+        if os.path.exists(pipe_path):
+            t2 = threading.Thread(target=_pipe_reader, daemon=True,
+                                  name=f"metadata-pipe-{mac.replace(':', '')}")
+            t2.start()
         with self._lock:
-            self._metadata_threads[mac] = thread
+            self._metadata_threads[mac] = t1
+
+    def _read_dbus_metadata(self) -> dict[str, str]:
+        """Read track metadata from shairport-sync's native D-Bus interface."""
+        try:
+            env = os.environ.copy()
+            env["XDG_RUNTIME_DIR"] = self._runtime_dir
+            env["DBUS_SESSION_BUS_ADDRESS"] = os.environ.get(
+                "DBUS_SESSION_BUS_ADDRESS",
+                f"unix:path={self._runtime_dir}/bus",
+            )
+            result: dict[str, str] = {}
+            for prop, key in (("Title", "title"), ("Artist", "artist"),
+                              ("Album", "album"), ("Genre", "genre")):
+                try:
+                    proc = subprocess.run(  # noqa: S603
+                        ["dbus-send", "--session", "--print-reply",
+                         "--dest=org.gnome.ShairportSync",
+                         "/org/gnome/ShairportSync",
+                         "org.freedesktop.DBus.Properties.Get",
+                         "string:org.gnome.ShairportSync.RemoteControl",
+                         f"string:{prop}"],
+                        capture_output=True, text=True, timeout=3, env=env,
+                    )
+                    if proc.returncode == 0 and "string" in proc.stdout:
+                        for line in proc.stdout.splitlines():
+                            line = line.strip()
+                            if line.startswith("variant") and "string" in line:
+                                val = line.split('"')[1] if '"' in line else ""
+                                if val:
+                                    result[key] = val
+                                break
+                except Exception:  # noqa: BLE001
+                    pass
+            return result
+        except Exception:  # noqa: BLE001
+            return {}
 
     def _stop_metadata_reader(self, mac: str) -> None:
         """Stop the metadata reader thread and clean up the pipe."""
@@ -237,10 +293,12 @@ alsa = {{
 }};
 """
 
+        metadata_pipe = self._metadata_pipe_path(safe_mac)
         conf += f"""
 metadata = {{
     enabled = "yes";
     include_cover_art = "yes";
+    pipe_name = "{metadata_pipe}";
 }};
 
 sessioncontrol = {{
@@ -294,6 +352,11 @@ sessioncontrol = {{
 
             port = self.generate_conf(speaker, index, sink_name=sink_name)
             conf_path = self._conf_path(mac)
+
+            # Create the metadata FIFO before shairport-sync starts so it
+            # finds the pipe at the path we configured in its config file.
+            self._ensure_metadata_pipe(mac)
+
             _LOG.info("[Shairport] Starting shairport-sync for %s: conf=%s port=%d sink=%s",
                       mac, conf_path, port, sink_name or "default")
             try:
