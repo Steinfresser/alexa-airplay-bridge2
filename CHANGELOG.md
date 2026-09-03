@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.38 (2026-09-03)
+
+- **Fixed broken sink keepalive (was silently exiting immediately)**: The `pacat` keepalive process in 2.0.37 was started with `stdin=DEVNULL` and `/dev/zero` as a positional argument. `pacat` reads from stdin, not from a file argument, so it received zero bytes and exited instantly — the sink had no protection against WirePlumber removal. Now `/dev/zero` is opened as a file descriptor and piped to `pacat`'s stdin, creating a genuine continuous silence stream. A monitor thread logs if the keepalive ever exits unexpectedly.
+- **Broadened WirePlumber anti-suspend rules**: Added `monitor.alsa.rules` alongside `monitor.bluez.rules` to catch Bluetooth nodes that appear under either monitor. Simplified glob to `~bluez_*` to match all Bluetooth node name variants.
+
 ## 2.0.37 (2026-09-03)
 
 - **Fixed disappearing Bluetooth A2DP sink (root cause of no audio)**: WirePlumber was suspending and removing idle Bluetooth sink nodes after a few seconds. By the time shairport-sync or the test tone tried to play audio, the sink was gone and everything routed to `auto_null` (silence). Three fixes:

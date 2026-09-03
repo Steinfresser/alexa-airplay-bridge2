@@ -483,16 +483,40 @@ class PipeWireManager:
         """
         self._stop_sink_keepalive(mac)
         try:
+            devzero = open("/dev/zero", "rb")  # noqa: SIM115, PTH123
             proc = subprocess.Popen(  # noqa: S603
                 ["pacat", "--playback", "--device", sink,
                  "--rate=44100", "--channels=2", "--format=s16le",
-                 "--volume=0", "/dev/zero"],
-                stdin=subprocess.DEVNULL,
+                 "--volume=0", "--latency-msec=1000"],
+                stdin=devzero,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 env=self.env,
             )
             self._keepalive_procs[mac] = proc
+
+            def _monitor_keepalive(p: subprocess.Popen, m: str, s: str, fh: object) -> None:
+                rc = p.wait()
+                stderr_out = ""
+                try:
+                    stderr_out = p.stderr.read().decode("utf-8", errors="replace")[:500] if p.stderr else ""
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    fh.close()  # type: ignore[union-attr]
+                except Exception:  # noqa: BLE001
+                    pass
+                if rc != 0:
+                    _LOG.warning("[PipeWire] Sink keepalive for %s exited (rc=%d, sink=%s): %s",
+                                 m, rc, s, stderr_out)
+                else:
+                    _LOG.info("[PipeWire] Sink keepalive for %s ended normally", m)
+
+            threading.Thread(
+                target=_monitor_keepalive, args=(proc, mac, sink, devzero),
+                daemon=True, name=f"keepalive-mon-{mac.replace(':', '')}",
+            ).start()
+
             _LOG.info("[PipeWire] Sink keepalive started for %s (pid=%d, sink=%s)", mac, proc.pid, sink)
         except Exception as exc:  # noqa: BLE001
             _LOG.warning("[PipeWire] Failed to start sink keepalive for %s: %s", mac, exc)
