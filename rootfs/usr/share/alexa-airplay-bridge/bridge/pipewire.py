@@ -523,22 +523,30 @@ class PipeWireManager:
 
         pw_env = self.env
         pw_env["PULSE_SERVER"] = pulse_server
+        pw_env["PIPEWIRE_NODE"] = sink
+
+        # Log sink state right before playback.
+        code_state, state_out = self._run_cmd_env(
+            ["pactl", "list", "sinks", "short"], env=pw_env)
+        _LOG.info("[PipeWire] Sinks before test tone (rc=%d):\n%s", code_state, state_out.strip())
 
         attempts = [
-            (["paplay", "--server", pulse_server, "--device", sink, test_file], None),
-            (["paplay", "--device", sink, test_file], None),
-            (["pw-play", "--target", sink, test_file], None),
-            (["aplay", "-D", f"pulse:{sink}", test_file], None),
+            ["paplay", "--server", pulse_server, "--device", sink, test_file],
+            ["paplay", "--device", sink, test_file],
+            ["pw-play", "--target", sink, test_file],
+            ["aplay", "-D", "default", test_file],
         ]
 
-        for cmd, _ in attempts:
+        for cmd in attempts:
+            _LOG.info("[PipeWire] Test tone attempt: %s", " ".join(cmd))
             code, out = self._run_cmd_env(cmd, timeout=10, env=pw_env)
             if code == 0:
-                _LOG.info("[PipeWire] Test sound played to %s via %s", mac, sink)
+                _LOG.info("[PipeWire] Test sound played to %s via %s (cmd=%s)", mac, sink, cmd[0])
                 return True
-            _LOG.debug("[PipeWire] Test sound attempt failed (%s): %s", cmd[0], out.strip()[:200])
+            _LOG.warning("[PipeWire] Test sound attempt failed (rc=%d, cmd=%s): %s",
+                         code, cmd[0], out.strip()[:300])
 
-        _LOG.warning("[PipeWire] Test sound failed for %s (sink=%s): %s", mac, sink, out)
+        _LOG.error("[PipeWire] All test sound attempts failed for %s (sink=%s)", mac, sink)
         return False
 
 

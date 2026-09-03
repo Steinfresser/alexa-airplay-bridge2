@@ -1,9 +1,15 @@
 # Changelog
 
-## 2.0.35 (2026-09-03)
+## 2.0.36 (2026-09-03)
 
-- **Fixed shairport-sync STILL using ALSA backend**: having only a `pa = {}` block in the config is not enough — shairport-sync defaults to its first compiled-in backend (ALSA) unless explicitly told otherwise. Now sets `output_backend = "pa"` in the `general` section AND passes `-o pa` on the command line when a Bluetooth sink is available. This is the actual fix for the "no audio" problem.
-- **Fixed bt_switch.sh using wrong PipeWire socket path**: the hook script hardcoded `RUNTIME_DIR=/data/pipewire` instead of inheriting `XDG_RUNTIME_DIR` from shairport-sync's environment. This meant `pactl` inside the hook couldn't find the PipeWire/PulseAudio server, so the A2DP sink was never found during AirPlay streaming and audio fell through to `auto_null` (silence).
+- **Fixed shairport-sync crash: "pa" backend not supported**: the `-o pa` flag added in 2.0.35 caused a fatal crash because this build of shairport-sync does not expose a working "pa" backend despite being compiled with `--with-pulseaudio`. Reverted to the ALSA backend, which works through PipeWire's ALSA compatibility layer. Audio is now routed to the correct Bluetooth sink via the `PIPEWIRE_NODE` environment variable set to the A2DP sink name. This is the standard PipeWire mechanism for sink targeting.
+- **Added `PIPEWIRE_NODE` to test tone playback**: the test tone now also sets `PIPEWIRE_NODE` to the Bluetooth sink, ensuring `paplay`/`aplay` route audio to the correct device instead of `auto_null`.
+- **Added detailed diagnostic logging for test tone**: logs all available sinks before playback, logs each playback attempt with full command and return code/stderr, and logs warnings (not debug) on failure so issues are visible at normal log levels.
+
+## 2.0.35 (2026-09-03) [BROKEN — do not use]
+
+- Introduced `-o pa` flag which crashes shairport-sync. Superseded by 2.0.36.
+- Fixed bt_switch.sh using wrong PipeWire socket path.
 
 ## 2.0.34 (2026-09-03)
 

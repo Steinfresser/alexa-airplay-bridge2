@@ -222,7 +222,6 @@ general = {{
     volume_max_db = "0";
     dbus_service_bus = "session";
     mpris_service_bus = "session";
-{f'    output_backend = "pa";' if sink_name else ''}
 }};
 
 diagnostics = {{
@@ -231,16 +230,9 @@ diagnostics = {{
 }};
 """
 
-        if sink_name:
-            conf += f"""
-pa = {{
-    application_name = "{safe_name}";
-    device = "{sink_name}";
-}};
-"""
-        else:
-            conf += f"""
+        conf += f"""
 alsa = {{
+    output_device = "default";
     audio_backend_latency = {self._buffer_seconds};
 }};
 """
@@ -314,10 +306,10 @@ sessioncontrol = {{
                     "DBUS_SESSION_BUS_ADDRESS",
                     f"unix:path={self._runtime_dir}/bus",
                 )
+                if sink_name:
+                    env["PIPEWIRE_NODE"] = sink_name
 
                 cmd = ["shairport-sync", "-c", conf_path, "-v"]
-                if sink_name:
-                    cmd += ["-o", "pa"]
                 proc = subprocess.Popen(  # noqa: S603
                     cmd,
                     stdout=subprocess.PIPE,
