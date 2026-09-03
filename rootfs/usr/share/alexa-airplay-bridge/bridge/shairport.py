@@ -222,6 +222,7 @@ general = {{
     volume_max_db = "0";
     dbus_service_bus = "session";
     mpris_service_bus = "session";
+{f'    output_backend = "pa";' if sink_name else ''}
 }};
 
 diagnostics = {{
@@ -314,12 +315,11 @@ sessioncontrol = {{
                     f"unix:path={self._runtime_dir}/bus",
                 )
 
+                cmd = ["shairport-sync", "-c", conf_path, "-v"]
+                if sink_name:
+                    cmd += ["-o", "pa"]
                 proc = subprocess.Popen(  # noqa: S603
-                    [
-                        "shairport-sync",
-                        "-c", conf_path,
-                        "-v",
-                    ],
+                    cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     env=env,

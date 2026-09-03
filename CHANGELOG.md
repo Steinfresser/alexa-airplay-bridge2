@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.35 (2026-09-03)
+
+- **Fixed shairport-sync STILL using ALSA backend**: having only a `pa = {}` block in the config is not enough — shairport-sync defaults to its first compiled-in backend (ALSA) unless explicitly told otherwise. Now sets `output_backend = "pa"` in the `general` section AND passes `-o pa` on the command line when a Bluetooth sink is available. This is the actual fix for the "no audio" problem.
+- **Fixed bt_switch.sh using wrong PipeWire socket path**: the hook script hardcoded `RUNTIME_DIR=/data/pipewire` instead of inheriting `XDG_RUNTIME_DIR` from shairport-sync's environment. This meant `pactl` inside the hook couldn't find the PipeWire/PulseAudio server, so the A2DP sink was never found during AirPlay streaming and audio fell through to `auto_null` (silence).
+
 ## 2.0.34 (2026-09-03)
 
 - **Fixed WirePlumber "can't find protocol PipeWire:Protocol:Native"**: the custom `wireplumber.conf` from 2.0.32 replaced the entire WirePlumber configuration instead of supplementing it. The `context.modules` section was missing, so `libpipewire-module-protocol-native` was never loaded and WirePlumber could not connect to PipeWire at all — no Bluetooth sinks were ever created. Replaced the monolithic config with a drop-in fragment at `wireplumber.conf.d/90-headless-bluetooth.conf` that only disables `seat-monitoring` and `logind` without touching module loading.

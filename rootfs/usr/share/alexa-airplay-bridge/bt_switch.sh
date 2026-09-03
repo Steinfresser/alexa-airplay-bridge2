@@ -17,7 +17,7 @@ MODE="${3:-connect}"
 LOG_TAG="[BT-SWITCH]"
 
 DATA_DIR="/data"
-RUNTIME_DIR="${DATA_DIR}/pipewire"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/data/pipewire}"
 PULSE_SOCKET="${RUNTIME_DIR}/pulse/native"
 A2DP_WAIT_SECONDS=10
 
