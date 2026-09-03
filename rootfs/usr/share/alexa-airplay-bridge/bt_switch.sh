@@ -44,6 +44,22 @@ fi
 # Normalise MAC for sink name matching (AC:EF:92:... -> AC_EF_92_...)
 MAC_NORM="${NEW_MAC//:/_}"
 
+# --- DEBUG: log all environment details ---
+log "DEBUG env: XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+log "DEBUG env: PULSE_SERVER=${PULSE_SERVER}"
+log "DEBUG env: PULSE_RUNTIME_PATH=${PULSE_RUNTIME_PATH}"
+log "DEBUG env: DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}"
+log "DEBUG env: PIPEWIRE_NODE=${PIPEWIRE_NODE:-unset}"
+log "DEBUG: pulse socket exists: $(test -e "${PULSE_SOCKET}" && echo YES || echo NO)"
+log "DEBUG: pactl info:"
+pactl info 2>&1 | head -5 | while read -r line; do log "  $line"; done
+log "DEBUG: all sinks at entry:"
+pactl list sinks short 2>&1 | while read -r line; do log "  $line"; done
+log "DEBUG: all cards at entry:"
+pactl list cards short 2>&1 | while read -r line; do log "  $line"; done
+log "DEBUG: bluetoothctl info ${NEW_MAC}:"
+bluetoothctl info "${NEW_MAC}" 2>&1 | grep -E "Connected|UUID|Name" | while read -r line; do log "  $line"; done
+
 # --- 1. Wait for A2DP sink to appear in PipeWire/PulseAudio -------------------
 log "Waiting for A2DP sink to appear (up to ${A2DP_WAIT_SECONDS}s)..."
 sink_name=""

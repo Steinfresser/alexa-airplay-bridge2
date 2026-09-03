@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.41 (2026-09-03)
+
+- **CRITICAL FIX: shairport-sync crash on startup** — v2.0.40 set the ALSA `output_device` to the PipeWire sink name (e.g. `bluez_sink.AC_EF_92_...`), but shairport-sync's ALSA backend can only open ALSA device names ("default", "hw:0,0"). This caused `error -2 ("No such file or directory")` and a fatal crash. Reverted to `output_device = "default"` and rely on `PIPEWIRE_NODE` env var + default sink routing instead.
+- **CRITICAL FIX: _force_transport actually removed this time** — v2.0.40's sub-agent edit did not apply. The suspend/resume cycle was still running and destroying the BT sink. Now confirmed removed (zero `self._force_transport` calls remain).
+- **FIX: keepalive volume=0 -> volume=1 actually applied** — same issue, now confirmed.
+- **Paranoid watchdog logging added** — every 15s the monitor now logs: all PipeWire sinks, default sink, keepalive process status, and per-speaker BT/shairport/sink state. bt_switch.sh logs its full environment, pactl info, all sinks/cards, and bluetoothctl status on entry. Shairport startup logs the full generated config and environment. Test sound logs full diagnostics before playing.
+
 ## 2.0.40 (2026-09-03)
 
 - **Fixed audio never reaching the Bluetooth speaker (critical)**: The shairport-sync config always used `output_device = "default"` even when a specific A2DP sink name was provided. Audio went to PipeWire's auto_null instead of the Bluetooth speaker. Now the config writes the actual A2DP sink name as `output_device` when available. Also fixed `audio_backend_latency` (was set to integer seconds, now uses the correct `audio_backend_latency_offset_in_seconds` at 0.25s).

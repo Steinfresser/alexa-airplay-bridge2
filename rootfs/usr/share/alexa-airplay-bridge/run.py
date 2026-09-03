@@ -134,7 +134,7 @@ class BridgeEngine:
                 _LOG.info("[Startup] No saved speakers — start pairing via the Web UI")
 
             # Availability monitor (drives Shairport lifecycle on BT transitions).
-            self.monitor = AvailabilityMonitor(self.db, self.bt, self.shairport, interval=15)
+            self.monitor = AvailabilityMonitor(self.db, self.bt, self.shairport, interval=15, pipewire=self.pipewire)
             self.monitor.start()
             # Shairport lifecycle monitor (watches process + BT state).
             self.shairport.start_monitor()

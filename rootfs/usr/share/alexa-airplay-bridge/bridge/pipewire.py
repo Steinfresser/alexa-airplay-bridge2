@@ -305,19 +305,23 @@ class PipeWireManager:
         as the sink is discovered — typically used to regenerate the Shairport
         config and restart the instance.
         """
+        _LOG.info("[PipeWire] [WAIT-SINK] Starting sink poll for %s (timeout=%.0fs)", mac, timeout)
         deadline = time.time() + timeout
         attempt = 0
         forced_reconnect = False
         while time.time() < deadline:
             attempt += 1
             sink = self.find_bluetooth_sink(mac)
+            if attempt <= 3 or attempt % 5 == 0:
+                _LOG.info("[PipeWire] [WAIT-SINK] Attempt %d for %s: sink=%s", attempt, mac, sink)
             if sink:
                 _LOG.info("[PipeWire] A2DP sink %s appeared after %d attempt(s) for %s", sink, attempt, mac)
+                _LOG.info("[PipeWire] [WAIT-SINK] All sinks at discovery:\n%s", self.list_sinks().strip())
                 self.set_default_sink(sink)
                 self._start_sink_keepalive(sink, mac)
                 _LOG.info("[PipeWire] Waiting 2s for A2DP transport to settle for %s", mac)
                 time.sleep(2.0)
-                self._force_transport(sink)
+                _LOG.info("[PipeWire] [WAIT-SINK] Sinks after 2s settle:\n%s", self.list_sinks().strip())
                 if on_found is not None:
                     try:
                         on_found(sink)
@@ -482,30 +486,40 @@ class PipeWireManager:
         write audio to it at any time without the node vanishing.
         """
         self._stop_sink_keepalive(mac)
+        _LOG.info("[PipeWire] [KEEPALIVE] Starting keepalive for %s -> sink=%s", mac, sink)
+        sinks_before = self.list_sinks()
+        _LOG.info("[PipeWire] [KEEPALIVE] Sinks at keepalive start:\n%s", sinks_before.strip())
         try:
             devzero = open("/dev/zero", "rb")  # noqa: SIM115, PTH123
             proc = subprocess.Popen(  # noqa: S603
                 ["pacat", "--playback", "--device", sink,
                  "--rate=44100", "--channels=2", "--format=s16le",
-                 "--volume=0", "--latency-msec=1000"],
+                 "--volume=1", "--latency-msec=1000"],
                 stdin=devzero,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 env=self.env,
             )
             self._keepalive_procs[mac] = proc
 
             def _monitor_keepalive(p: subprocess.Popen, m: str, s: str, fh: object) -> None:
                 rc = p.wait()
+                stderr_out = ""
+                try:
+                    stderr_out = p.stderr.read().decode("utf-8", errors="replace")[:500] if p.stderr else ""
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     fh.close()  # type: ignore[union-attr]
                 except Exception:  # noqa: BLE001
                     pass
                 if rc != 0:
-                    _LOG.warning("[PipeWire] Sink keepalive for %s exited (rc=%d, sink=%s)",
-                                 m, rc, s)
+                    _LOG.warning("[PipeWire] [KEEPALIVE] Keepalive for %s DIED (rc=%d, sink=%s): %s",
+                                 m, rc, s, stderr_out)
                 else:
-                    _LOG.info("[PipeWire] Sink keepalive for %s ended normally", m)
+                    _LOG.info("[PipeWire] [KEEPALIVE] Keepalive for %s ended normally (was terminated)", m)
+                sinks_after = PipeWireManager._run_cmd(["pactl", "list", "sinks", "short"])
+                _LOG.info("[PipeWire] [KEEPALIVE] Sinks after keepalive exit for %s:\n%s", m, sinks_after[1].strip())
 
             threading.Thread(
                 target=_monitor_keepalive, args=(proc, mac, sink, devzero),
@@ -546,27 +560,25 @@ class PipeWireManager:
         time.sleep(1.0)
 
     def play_test_sound(self, mac: str) -> bool:
-        """Play a short test tone to the Bluetooth sink (or default sink).
-
-        Forces the A2DP transport to (re)acquire before playing, since
-        PipeWire can leave Bluetooth sinks in SUSPENDED state where audio
-        is silently discarded. Uses a 5-second tone to give the transport
-        time to settle after the suspend/resume cycle.
-        """
+        """Play a short test tone to the Bluetooth sink (or default sink)."""
+        _LOG.info("[PipeWire] [TEST] === Test sound requested for %s ===", mac)
+        _LOG.info("[PipeWire] [TEST] Full diagnostics BEFORE test:\n%s", self.dump_diagnostics())
+        keepalive_proc = self._keepalive_procs.get(mac)
+        if keepalive_proc:
+            _LOG.info("[PipeWire] [TEST] Keepalive for %s: pid=%d alive=%s",
+                      mac, keepalive_proc.pid, keepalive_proc.poll() is None)
+        else:
+            _LOG.warning("[PipeWire] [TEST] No keepalive process for %s!", mac)
         sink = self.find_bluetooth_sink(mac)
+        _LOG.info("[PipeWire] [TEST] find_bluetooth_sink(%s) returned: %s", mac, sink)
         if sink is None:
-            _LOG.warning("[PipeWire] BT sink not found for %s — dumping diagnostics", mac)
-            _LOG.warning("[PipeWire] Diagnostics:\n%s", self.dump_diagnostics())
+            _LOG.warning("[PipeWire] [TEST] BT sink not found — full diagnostics:\n%s", self.dump_diagnostics())
             sink = self.get_default_sink()
+            _LOG.info("[PipeWire] [TEST] Falling back to default sink: %s", sink)
         if sink is None or sink == "auto_null":
-            _LOG.error("[PipeWire] No usable sink for test sound to %s (sink=%s). "
-                       "The A2DP node has likely been removed by WirePlumber.",
-                       mac, sink)
+            _LOG.error("[PipeWire] [TEST] No usable sink for %s (sink=%s). "
+                       "The A2DP node has likely been removed by WirePlumber.", mac, sink)
             return False
-
-        # Force the A2DP transport to acquire before doing anything else.
-        _LOG.info("[PipeWire] Forcing A2DP transport for sink %s", sink)
-        self._force_transport(sink)
 
         # Unmute and set volume to 100% before playing.
         self._run_cmd_env(["pactl", "set-sink-mute", sink, "0"])

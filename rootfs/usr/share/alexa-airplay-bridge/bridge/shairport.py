@@ -324,15 +324,7 @@ diagnostics = {{
 }};
 """
 
-        if sink_name:
-            conf += f"""
-alsa = {{
-    output_device = "{sink_name}";
-    audio_backend_latency_offset_in_seconds = 0.25;
-}};
-"""
-        else:
-            conf += f"""
+        conf += f"""
 alsa = {{
     output_device = "default";
     audio_backend_latency_offset_in_seconds = 0.25;
@@ -403,6 +395,13 @@ sessioncontrol = {{
             # finds the pipe at the path we configured in its config file.
             self._ensure_metadata_pipe(mac)
 
+            # Log the generated config for debugging.
+            try:
+                with open(conf_path, "r", encoding="utf-8") as _cfh:
+                    _LOG.info("[Shairport] [DEBUG] Config for %s:\n%s", mac, _cfh.read())
+            except OSError:
+                pass
+
             _LOG.info("[Shairport] Starting shairport-sync for %s: conf=%s port=%d sink=%s",
                       mac, conf_path, port, sink_name or "default")
             try:
@@ -417,6 +416,14 @@ sessioncontrol = {{
                 )
                 if sink_name:
                     env["PIPEWIRE_NODE"] = sink_name
+
+                _LOG.info("[Shairport] [DEBUG] Env for %s: PULSE_SERVER=%s XDG_RUNTIME_DIR=%s PIPEWIRE_NODE=%s",
+                          mac, env.get("PULSE_SERVER"), env.get("XDG_RUNTIME_DIR"), env.get("PIPEWIRE_NODE", "unset"))
+
+                # Log available sinks right before starting.
+                if self._pipewire is not None:
+                    _LOG.info("[Shairport] [DEBUG] Sinks before shairport start:\n%s",
+                              self._pipewire.list_sinks().strip())
 
                 cmd = ["shairport-sync", "-c", conf_path, "-v"]
                 proc = subprocess.Popen(  # noqa: S603
