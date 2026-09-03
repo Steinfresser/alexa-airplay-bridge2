@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.46 (2026-09-03)
+
+- **Fixed host audio conflict on HAOS — uses HA PulseAudio instead of own PipeWire.** When the Home Assistant supervisor provides `PULSE_SERVER` (add-ons with `audio: true`), the bridge now detects it at startup and skips launching its own PipeWire/WirePlumber/pipewire-pulse daemons. All audio commands (`pactl`, shairport-sync, test tones) route through the HA PulseAudio server instead. This eliminates the `RegisterProfile() failed: org.bluez.Error.NotPermitted` conflict where the add-on's PipeWire and `hassio_audio` fought over the Bluetooth A2DP transport. The entrypoint no longer kills `pulseaudio`/`bluealsa` when HA audio is active. Standalone (non-HAOS) deployments still start their own PipeWire stack as before.
+
 ## 2.0.45 (2026-09-03)
 
 - **Reverted shairport-sync back to ALSA backend.** The `pa` (PulseAudio) output backend is not available in this shairport-sync build despite PulseAudio appearing in the version string. Audio routing now works via ALSA -> `alsa-plugins-pulse` -> PipeWire (the `asound.conf` routes ALSA's default device through the PulseAudio plugin). The `PULSE_SERVER` and `PIPEWIRE_NODE` env vars (already set) direct audio to the correct Bluetooth sink.
