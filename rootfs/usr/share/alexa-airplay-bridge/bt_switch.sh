@@ -22,10 +22,17 @@ PULSE_SOCKET="${RUNTIME_DIR}/pulse/native"
 A2DP_WAIT_SECONDS=10
 
 # Export PipeWire/PulseAudio env vars so pactl finds the right server.
-export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
-export PULSE_SERVER="unix:${PULSE_SOCKET}"
-export PULSE_RUNTIME_PATH="${RUNTIME_DIR}/pulse"
-export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${RUNTIME_DIR}/bus}"
+# If the HA supervisor set PULSE_SERVER (audio: true), use that instead of
+# our own PipeWire socket — avoids A2DP profile conflict with hassio_audio.
+if [ -n "${PULSE_SERVER:-}" ]; then
+    log "Using HA audio (PULSE_SERVER=${PULSE_SERVER})"
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${RUNTIME_DIR}/bus}"
+else
+    export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
+    export PULSE_SERVER="unix:${PULSE_SOCKET}"
+    export PULSE_RUNTIME_PATH="${RUNTIME_DIR}/pulse"
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${RUNTIME_DIR}/bus}"
+fi
 
 log() {
     echo "${LOG_TAG} $(date '+%H:%M:%S') $*" | tee -a "${DATA_DIR}/bridge.log" 2>/dev/null || echo "${LOG_TAG} $*"

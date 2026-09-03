@@ -406,10 +406,15 @@ sessioncontrol = {{
                       mac, conf_path, port, sink_name or "default")
             try:
                 env = os.environ.copy()
-                env["PULSE_SERVER"] = f"unix:{self._runtime_dir}/pulse/native"
-                env["XDG_RUNTIME_DIR"] = self._runtime_dir
-                env["PIPEWIRE_RUNTIME_DIR"] = self._runtime_dir
-                env["PULSE_RUNTIME_PATH"] = os.path.join(self._runtime_dir, "pulse")
+                ha_pulse = os.environ.get("PULSE_SERVER", "")
+                if ha_pulse:
+                    # HA audio mode: keep supervisor-provided PULSE_SERVER.
+                    pass
+                else:
+                    env["PULSE_SERVER"] = f"unix:{self._runtime_dir}/pulse/native"
+                    env["XDG_RUNTIME_DIR"] = self._runtime_dir
+                    env["PIPEWIRE_RUNTIME_DIR"] = self._runtime_dir
+                    env["PULSE_RUNTIME_PATH"] = os.path.join(self._runtime_dir, "pulse")
                 env["DBUS_SESSION_BUS_ADDRESS"] = os.environ.get(
                     "DBUS_SESSION_BUS_ADDRESS",
                     f"unix:path={self._runtime_dir}/bus",

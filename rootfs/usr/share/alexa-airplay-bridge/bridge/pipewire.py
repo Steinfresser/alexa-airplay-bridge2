@@ -19,7 +19,14 @@ _TEST_WAV_PATH = "/usr/share/sounds/alsa/test.wav"
 
 
 class PipeWireManager:
-    """Starts and supervises PipeWire + WirePlumber + pipewire-pulse."""
+    """Starts and supervises PipeWire + WirePlumber + pipewire-pulse.
+
+    When the Home Assistant audio system is available (``PULSE_SERVER`` env
+    var set by the HA supervisor for add-ons with ``audio: true``), this
+    manager skips launching its own PipeWire stack and routes all audio
+    commands through the HA PulseAudio server instead.  This avoids the
+    Bluetooth A2DP profile conflict with ``hassio_audio``.
+    """
 
     def __init__(self, runtime_dir: str) -> None:
         self._runtime_dir = runtime_dir
@@ -29,9 +36,23 @@ class PipeWireManager:
         self._wireplumber_proc: Optional[subprocess.Popen] = None
         self._keepalive_procs: dict[str, subprocess.Popen] = {}
 
+        # Detect Home Assistant audio infrastructure.
+        ha_pulse = os.environ.get("PULSE_SERVER", "")
+        self._ha_audio = bool(ha_pulse)
+        if self._ha_audio:
+            _LOG.info("[PipeWire] HA audio detected (PULSE_SERVER=%s) — using HA PulseAudio, skipping own PipeWire", ha_pulse)
+
+    @property
+    def ha_audio(self) -> bool:
+        """True when using Home Assistant's PulseAudio instead of own PipeWire."""
+        return self._ha_audio
+
     @property
     def env(self) -> dict[str, str]:
         env = os.environ.copy()
+        if self._ha_audio:
+            # Keep the supervisor-provided PULSE_SERVER; don't override it.
+            return env
         env["XDG_RUNTIME_DIR"] = self._runtime_dir
         env["PIPEWIRE_RUNTIME_DIR"] = self._runtime_dir
         env["PULSE_RUNTIME_PATH"] = os.path.join(self._runtime_dir, "pulse")
@@ -42,6 +63,15 @@ class PipeWireManager:
         return env
 
     def start(self) -> bool:
+        if self._ha_audio:
+            _LOG.info("[PipeWire] HA audio mode — no local daemons to start")
+            code, out = self._run_cmd_env(["pactl", "info"], timeout=5)
+            if code == 0:
+                _LOG.info("[PipeWire] HA PulseAudio reachable:\n%s", out.strip()[:500])
+            else:
+                _LOG.warning("[PipeWire] Cannot reach HA PulseAudio: %s", out.strip()[:200])
+            return code == 0
+
         with self._lock:
             os.makedirs(self._runtime_dir, exist_ok=True)
             os.makedirs(os.path.join(self._runtime_dir, "pulse"), exist_ok=True)
@@ -146,6 +176,9 @@ class PipeWireManager:
 
     def stop(self) -> None:
         self.stop_all_keepalives()
+        if self._ha_audio:
+            _LOG.info("[PipeWire] HA audio mode — no local daemons to stop")
+            return
         with self._lock:
             for name, proc in (
                 ("pipewire-pulse", self._pulse_proc),
@@ -167,6 +200,9 @@ class PipeWireManager:
             self._wireplumber_proc = None
 
     def restart(self) -> bool:
+        if self._ha_audio:
+            _LOG.info("[PipeWire] HA audio mode — restart is a no-op for local daemons")
+            return self.start()
         self.stop()
         time.sleep(1)
         return self.start()
@@ -263,7 +299,15 @@ class PipeWireManager:
         return out
 
     def get_status(self) -> dict[str, str]:
+        if self._ha_audio:
+            code, _ = self._run_cmd_env(["pactl", "info"], timeout=3)
+            return {
+                "mode": "ha_audio",
+                "ha_pulseaudio_reachable": "yes" if code == 0 else "no",
+                "pulse_server": os.environ.get("PULSE_SERVER", ""),
+            }
         return {
+            "mode": "standalone",
             "pipewire_running": "yes" if self._is_running("pipewire") else "no",
             "pipewire_pulse_running": "yes" if self._is_running("pipewire-pulse") else "no",
             "wireplumber_running": "yes" if self._is_running("wireplumber") else "no",
@@ -620,7 +664,7 @@ class PipeWireManager:
         # Generate a 5-second tone — the first 1-2 seconds may be consumed by
         # the A2DP transport handshake, so a longer tone ensures audible output.
         test_file = self._get_test_wav(duration=5.0)
-        pulse_server = f"unix:{self._runtime_dir}/pulse/native"
+        pulse_server = os.environ.get("PULSE_SERVER", f"unix:{self._runtime_dir}/pulse/native")
 
         _LOG.info("[PipeWire] Playing test sound to %s (sink=%s, file=%s)", mac, sink, test_file)
 
