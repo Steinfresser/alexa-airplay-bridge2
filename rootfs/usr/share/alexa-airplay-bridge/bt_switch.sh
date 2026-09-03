@@ -83,8 +83,8 @@ if [ -n "$sink_name" ]; then
     log "Sink ${sink_name} unmuted and volume set to 100%"
 
     # Move any existing playback streams to the new sink.
-    pactl list short 2>/dev/null \
-        | grep "protocol-native" | awk '{print $1}' | while read -r stream_id; do
+    pactl list sink-inputs short 2>/dev/null \
+        | awk '{print $1}' | while read -r stream_id; do
         pactl move-sink-input "$stream_id" "$sink_name" 2>&1 \
             | while read -r line; do log "  move $stream_id: $line"; done || true
     done

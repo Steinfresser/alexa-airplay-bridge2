@@ -127,17 +127,21 @@ def create_app(engine: "BridgeEngine") -> Flask:
     @app.route("/api/status", methods=["GET"])
     def api_status() -> "flask.Response":
         """Return the live AirPlay, Bluetooth, and PipeWire topology."""
-        playback = engine.pipewire.list_playback()
+        all_np = engine.shairport.get_all_now_playing()
         active_client = None
-        for line in playback.splitlines():
-            stripped = line.strip()
-            low = stripped.lower()
-            if "application.name" in low or "media.name" in low or "client.name" in low:
-                if "=" in stripped:
-                    value = stripped.split("=", 1)[1].strip().strip('"')
-                    if value and value.lower() not in ("pipewire", "pulseaudio"):
-                        active_client = value
-                        break
+        if all_np:
+            for np_entry in all_np:
+                if np_entry.get("status") == "playing":
+                    title = np_entry.get("title", "")
+                    artist = np_entry.get("artist", "")
+                    client_name = np_entry.get("client", "")
+                    if title or artist:
+                        active_client = f"{artist} \u2014 {title}" if artist and title else (title or artist)
+                    elif client_name:
+                        active_client = client_name
+                    else:
+                        active_client = "AirPlay stream active"
+                    break
 
         bluetooth_devices = []
         airplay_instances = []
@@ -173,7 +177,7 @@ def create_app(engine: "BridgeEngine") -> Flask:
             })
 
         default_sink = engine.pipewire.get_default_sink()
-        now_playing = engine.shairport.get_all_now_playing()
+        now_playing = all_np
         return jsonify({
             "status": "ok",
             "bluetooth_devices": bluetooth_devices,

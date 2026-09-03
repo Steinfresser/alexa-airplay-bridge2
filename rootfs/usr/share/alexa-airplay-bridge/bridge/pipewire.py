@@ -490,25 +490,20 @@ class PipeWireManager:
                  "--volume=0", "--latency-msec=1000"],
                 stdin=devzero,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 env=self.env,
             )
             self._keepalive_procs[mac] = proc
 
             def _monitor_keepalive(p: subprocess.Popen, m: str, s: str, fh: object) -> None:
                 rc = p.wait()
-                stderr_out = ""
-                try:
-                    stderr_out = p.stderr.read().decode("utf-8", errors="replace")[:500] if p.stderr else ""
-                except Exception:  # noqa: BLE001
-                    pass
                 try:
                     fh.close()  # type: ignore[union-attr]
                 except Exception:  # noqa: BLE001
                     pass
                 if rc != 0:
-                    _LOG.warning("[PipeWire] Sink keepalive for %s exited (rc=%d, sink=%s): %s",
-                                 m, rc, s, stderr_out)
+                    _LOG.warning("[PipeWire] Sink keepalive for %s exited (rc=%d, sink=%s)",
+                                 m, rc, s)
                 else:
                     _LOG.info("[PipeWire] Sink keepalive for %s ended normally", m)
 

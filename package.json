@@ -1,6 +1,6 @@
 {
   "name": "alexa-airplay-bridge",
-  "version": "2.0.39",
+  "version": "2.0.40",
   "private": true,
   "description": "AirPlay to Bluetooth Bridge for Home Assistant",
   "scripts": {

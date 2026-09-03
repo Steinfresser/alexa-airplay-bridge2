@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.40 (2026-09-03)
+
+- **Fixed audio never reaching the Bluetooth speaker (critical)**: The shairport-sync config always used `output_device = "default"` even when a specific A2DP sink name was provided. Audio went to PipeWire's auto_null instead of the Bluetooth speaker. Now the config writes the actual A2DP sink name as `output_device` when available. Also fixed `audio_backend_latency` (was set to integer seconds, now uses the correct `audio_backend_latency_offset_in_seconds` at 0.25s).
+- **Fixed stream-move command in bt_switch.sh**: Used `pactl list short` (lists all object types) instead of `pactl list sink-inputs short`, so existing playback streams were never moved to the BT sink on AirPlay stream start.
+- **Fixed potential keepalive deadlock**: The keepalive pacat process used `stderr=PIPE` but the monitor thread only read stderr after the process exited, risking a pipe-buffer deadlock on long-running processes. Changed to `stderr=DEVNULL`.
+- **Fixed keepalive not cleaned up on BT disconnect**: When a Bluetooth device disconnected, the silent keepalive stream was left running. Now `stop_instance` also stops the PipeWire keepalive for that speaker.
+
 ## 2.0.39 (2026-09-03)
 
 - **Fixed AirPlay metadata display (track title, artist, album never shown)**: The metadata reader was creating a FIFO at a different path than shairport-sync was writing to. Shairport-sync wrote to its default pipe `/tmp/shairport-sync-metadata`, but the reader listened on a per-speaker FIFO in the runtime dir. Now the shairport-sync config explicitly sets `pipe_name` to the per-speaker FIFO path. Additionally, replaced the broken text-based pipe parser (shairport-sync writes binary metadata, not `key=value` lines) with a D-Bus poller that reads Title/Artist/Album from shairport-sync's native `org.gnome.ShairportSync` D-Bus interface every 3 seconds. The pipe is still used as a secondary signal to detect playback start.

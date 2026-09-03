@@ -143,20 +143,19 @@ class ShairportManager:
                     if meta:
                         with self._lock:
                             existing = self._now_playing.get(mac, {})
-                            if meta.get("title") or meta.get("artist"):
-                                existing.update(meta)
-                                existing["status"] = "playing"
-                                self._now_playing[mac] = existing
-                                if self._bt is not None:
-                                    try:
-                                        self._bt.update_mpris_metadata(
-                                            mac,
-                                            existing.get("title", ""),
-                                            existing.get("artist", ""),
-                                            existing.get("album", ""),
-                                        )
-                                    except Exception:  # noqa: BLE001
-                                        pass
+                            existing.update(meta)
+                            existing["status"] = "playing"
+                            self._now_playing[mac] = existing
+                            if (meta.get("title") or meta.get("artist")) and self._bt is not None:
+                                try:
+                                    self._bt.update_mpris_metadata(
+                                        mac,
+                                        existing.get("title", ""),
+                                        existing.get("artist", ""),
+                                        existing.get("album", ""),
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    pass
                 except Exception as exc:  # noqa: BLE001
                     _LOG.debug("[Shairport] D-Bus metadata poll error for %s: %s", mac, exc)
                 time.sleep(3)
@@ -189,7 +188,12 @@ class ShairportManager:
             self._metadata_threads[mac] = t1
 
     def _read_dbus_metadata(self) -> dict[str, str]:
-        """Read track metadata from shairport-sync's native D-Bus interface."""
+        """Read track metadata from shairport-sync's native D-Bus interface.
+
+        Tries multiple D-Bus interfaces: RemoteControl (DACP clients) first,
+        then Diagnostics (all Classic AirPlay streams). Also checks the
+        Active property to detect playback even without metadata.
+        """
         try:
             env = os.environ.copy()
             env["XDG_RUNTIME_DIR"] = self._runtime_dir
@@ -198,31 +202,65 @@ class ShairportManager:
                 f"unix:path={self._runtime_dir}/bus",
             )
             result: dict[str, str] = {}
+
+            # Try RemoteControl interface first (works with DACP-capable clients).
             for prop, key in (("Title", "title"), ("Artist", "artist"),
                               ("Album", "album"), ("Genre", "genre")):
-                try:
-                    proc = subprocess.run(  # noqa: S603
-                        ["dbus-send", "--session", "--print-reply",
-                         "--dest=org.gnome.ShairportSync",
-                         "/org/gnome/ShairportSync",
-                         "org.freedesktop.DBus.Properties.Get",
-                         "string:org.gnome.ShairportSync.RemoteControl",
-                         f"string:{prop}"],
-                        capture_output=True, text=True, timeout=3, env=env,
-                    )
-                    if proc.returncode == 0 and "string" in proc.stdout:
-                        for line in proc.stdout.splitlines():
-                            line = line.strip()
-                            if line.startswith("variant") and "string" in line:
-                                val = line.split('"')[1] if '"' in line else ""
-                                if val:
-                                    result[key] = val
-                                break
-                except Exception:  # noqa: BLE001
-                    pass
+                val = self._dbus_get_property(
+                    env, "org.gnome.ShairportSync.RemoteControl", prop)
+                if val:
+                    result[key] = val
+
+            # If RemoteControl yielded nothing, try Diagnostics interface.
+            if not result:
+                for prop, key in (("Title", "title"), ("Artist", "artist"),
+                                  ("Album", "album"), ("Genre", "genre")):
+                    val = self._dbus_get_property(
+                        env, "org.gnome.ShairportSync.Diagnostics", prop)
+                    if val:
+                        result[key] = val
+
+            # Check Active property to detect playback without metadata.
+            if not result:
+                active_val = self._dbus_get_property(
+                    env, "org.gnome.ShairportSync.Diagnostics", "Active")
+                if active_val and active_val.lower() == "true":
+                    result["status"] = "playing"
+
+            # Also try getting the client name from Diagnostics.
+            if not result.get("title"):
+                client = self._dbus_get_property(
+                    env, "org.gnome.ShairportSync.Diagnostics", "ClientName")
+                if client:
+                    result["client"] = client
+
             return result
         except Exception:  # noqa: BLE001
             return {}
+
+    @staticmethod
+    def _dbus_get_property(env: dict[str, str], interface: str, prop: str) -> str:
+        """Read a single string property from shairport-sync's D-Bus interface."""
+        try:
+            proc = subprocess.run(  # noqa: S603
+                ["dbus-send", "--session", "--print-reply",
+                 "--dest=org.gnome.ShairportSync",
+                 "/org/gnome/ShairportSync",
+                 "org.freedesktop.DBus.Properties.Get",
+                 f"string:{interface}",
+                 f"string:{prop}"],
+                capture_output=True, text=True, timeout=3, env=env,
+            )
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    line = line.strip()
+                    if "variant" in line and "string" in line:
+                        return line.split('"')[1] if '"' in line else ""
+                    if "variant" in line and "boolean" in line:
+                        return "true" if "true" in line.lower() else "false"
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
 
     def _stop_metadata_reader(self, mac: str) -> None:
         """Stop the metadata reader thread and clean up the pipe."""
@@ -286,10 +324,18 @@ diagnostics = {{
 }};
 """
 
-        conf += f"""
+        if sink_name:
+            conf += f"""
+alsa = {{
+    output_device = "{sink_name}";
+    audio_backend_latency_offset_in_seconds = 0.25;
+}};
+"""
+        else:
+            conf += f"""
 alsa = {{
     output_device = "default";
-    audio_backend_latency = {self._buffer_seconds};
+    audio_backend_latency_offset_in_seconds = 0.25;
 }};
 """
 
@@ -433,6 +479,8 @@ sessioncontrol = {{
                 self._check_crash(mac, proc)
             self._processes.pop(mac, None)
             self._stop_metadata_reader(mac)
+            if self._pipewire is not None:
+                self._pipewire._stop_sink_keepalive(mac)
             # Keep speaker metadata so a Bluetooth reconnect can restart it.
             conf_path = self._conf_path(mac)
             subprocess.run(  # noqa: S603
