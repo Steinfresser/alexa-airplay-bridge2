@@ -324,10 +324,12 @@ diagnostics = {{
 }};
 """
 
+        pa_sink = sink_name or "default"
         conf += f"""
-alsa = {{
-    output_device = "default";
-    audio_backend_latency_offset_in_seconds = 0.25;
+pa = {{
+    server = "unix:{runtime_dir}/pulse/native";
+    sink = "{pa_sink}";
+    application_name = "AirPlay Bridge";
 }};
 """
 
@@ -425,7 +427,7 @@ sessioncontrol = {{
                     _LOG.info("[Shairport] [DEBUG] Sinks before shairport start:\n%s",
                               self._pipewire.list_sinks().strip())
 
-                cmd = ["shairport-sync", "-c", conf_path, "-v"]
+                cmd = ["shairport-sync", "-c", conf_path, "--output=pa", "-v"]
                 proc = subprocess.Popen(  # noqa: S603
                     cmd,
                     stdout=subprocess.PIPE,

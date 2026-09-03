@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.43 (2026-09-03)
+
+- **Switched shairport-sync from ALSA to PulseAudio backend.** The ALSA backend sent audio to `auto_null` (the dummy soundcard) because it ignores `PULSE_SERVER`/`PIPEWIRE_NODE` env vars. Now uses `--output=pa` with an explicit `pa = { server=...; sink=...; }` config block that routes audio directly through PipeWire-pulse to the Bluetooth A2DP sink.
+- **Added host audio conflict detection.** The watchdog now checks for `RegisterProfile() failed: org.bluez.Error.NotPermitted` in the PipeWire log and emits a clear warning telling the user to stop the host sound server.
+
 ## 2.0.42 (2026-09-03)
 
 - **ROOT CAUSE: PulseAudio stole the Bluetooth A2DP transport from PipeWire.** The `pulseaudio` package was installed alongside PipeWire. PulseAudio registered the A2DP sink profile with BlueZ first, so PipeWire got "RegisterProfile() failed: org.bluez.Error.NotPermitted". PipeWire created a BT sink node, but no transport backed it -- all audio was silently discarded. Removed `pulseaudio` from the Docker image. Added safety `killall pulseaudio bluealsa` in entrypoint.

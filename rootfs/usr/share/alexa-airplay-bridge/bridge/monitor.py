@@ -65,6 +65,8 @@ class AvailabilityMonitor(threading.Thread):
                         _LOG.info("[Monitor] [WATCHDOG] keepalive %s: pid=%d alive=%s",
                                   mac_k, kp.pid, alive)
 
+                    self._pipewire.check_host_audio_conflict()
+
                 for spk in self._db.list_speakers():
                     status = self._bt.get_device_status(spk.mac)
                     connected = status.get("connected") == "yes"
