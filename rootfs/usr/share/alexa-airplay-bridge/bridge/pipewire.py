@@ -354,14 +354,10 @@ class PipeWireManager:
         gives WirePlumber a clean chance to acquire it.
         """
         _LOG.info("[PipeWire] Forcing BT disconnect/reconnect for %s", mac)
-        path = _mac_to_path(mac)
         self._run_cmd_env(["bluetoothctl", "disconnect", mac], timeout=10)
         time.sleep(2.0)
         self._run_cmd_env(["bluetoothctl", "connect", mac], timeout=15)
         time.sleep(2.0)
-        # Re-trigger A2DP profile connection.
-        self._run_cmd_env(["bluetoothctl", "menu", "transport"], timeout=5)
-        # Try setting the card profile again after reconnect.
         self.set_card_profile(mac, "a2dp_sink", retries=3)
 
     def find_bluetooth_sink(self, mac: str) -> Optional[str]:

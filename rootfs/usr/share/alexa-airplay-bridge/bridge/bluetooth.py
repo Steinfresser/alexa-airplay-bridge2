@@ -1119,21 +1119,17 @@ class BluetoothManager:
         audio never reaches the speaker.
 
         If the profile is already connected (common when Connect() did
-        auto-connect it), BlueZ returns org.bluez.Error.Failed. We treat this
-        as success since the desired state (A2DP connected) is already true.
+        auto-connect it), BlueZ returns org.bluez.Error.Failed — treated as
+        success since the desired state (A2DP connected) is already true.
 
-        However, if the transport was acquired by a competing sound server
-        (e.g. pulseaudio-bluez), the profile appears "connected" but
-        WirePlumber never creates the sink node. In that case we force a
-        Disconnect/Connect cycle to release the stale transport and let
-        WirePlumber acquire it cleanly.
-
-        Retries up to 3 times with a 2s delay for transient failures.
+        On InProgress, uses exponential backoff (1s, 3s, 5s) instead of
+        fixed 2s retries to avoid hammering BlueZ.
         """
         if not _dbus_ok or self._bus is None:
             return
         path = _mac_to_path(mac)
         max_attempts = 3
+        backoff = [1.0, 3.0, 5.0]
         for attempt in range(1, max_attempts + 1):
             ok, err = self._dbus_call(
                 path, _DEVICE_IFACE, "ConnectProfile",
@@ -1142,29 +1138,19 @@ class BluetoothManager:
             if ok:
                 _LOG.info("[BT] A2DP profile connected for %s (attempt %d)", mac, attempt)
                 return
-            # org.bluez.Error.Failed usually means the profile is already
-            # connected — but if WirePlumber hasn't created the sink, the
-            # transport may be held by a stale/competing sound server.
-            # Force a disconnect/reconnect to release it.
             if "Error.Failed" in (err or ""):
                 _LOG.info("[BT] A2DP profile already connected for %s (ConnectProfile returned Error.Failed)", mac)
-                _LOG.info("[BT] Forcing A2DP disconnect/reconnect to release stale transport for %s", mac)
-                self._dbus_call(path, _DEVICE_IFACE, "DisconnectProfile",
-                                signature="s", body=[_A2DP_UUID], timeout=10)
-                time.sleep(1.5)
-                ok2, err2 = self._dbus_call(
-                    path, _DEVICE_IFACE, "ConnectProfile",
-                    signature="s", body=[_A2DP_UUID], timeout=15,
-                )
-                if ok2:
-                    _LOG.info("[BT] A2DP profile re-connected for %s after stale transport release", mac)
-                    return
-                _LOG.warning("[BT] A2DP reconnect failed for %s: %s — will retry via sink polling", mac, err2)
                 return
+            if "InProgress" in (err or ""):
+                wait = backoff[min(attempt - 1, len(backoff) - 1)]
+                _LOG.info("[BT] A2DP ConnectProfile InProgress for %s — backoff %.0fs (attempt %d/%d)",
+                          mac, wait, attempt, max_attempts)
+                time.sleep(wait)
+                continue
             _LOG.warning("[BT] A2DP ConnectProfile attempt %d/%d failed for %s: %s",
                          attempt, max_attempts, mac, err)
             if attempt < max_attempts:
-                time.sleep(2.0)
+                time.sleep(backoff[min(attempt - 1, len(backoff) - 1)])
         _LOG.warning("[BT] A2DP ConnectProfile failed for %s after %d attempts (non-fatal, will retry via sink polling)",
                      mac, max_attempts)
 

@@ -109,11 +109,15 @@ def create_app(engine: "BridgeEngine") -> Flask:
         return jsonify({"status": "error", "message": "Not found"}), 404
 
     @app.errorhandler(500)
-    def _handle_500(_exc):  # type: ignore[return-value]
-        _LOG.error("[Web UI] 500 error on %s %s", request.method, request.path, exc_info=True)
-        if request.path.startswith("/api/"):
-            return jsonify({"status": "error", "message": "Internal server error"}), 500
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+    def _handle_500(exc):  # type: ignore[return-value]
+        _LOG.error("[Web UI] 500 error on %s %s: %s", request.method, request.path, exc, exc_info=True)
+        msg = str(exc) if str(exc) else "Internal server error"
+        return jsonify({"status": "error", "message": msg}), 500
+
+    @app.errorhandler(Exception)
+    def _handle_unhandled(exc):  # type: ignore[return-value]
+        _LOG.error("[Web UI] Unhandled exception on %s %s: %s", request.method, request.path, exc, exc_info=True)
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
     # ------------------------------------------------------------------ pages
     @app.route("/")
@@ -377,8 +381,6 @@ def create_app(engine: "BridgeEngine") -> Flask:
             engine.db.update(mac, connected=ok)
             test_sound_ok = False
             if ok:
-                # Wait up to 15s for the A2DP sink to appear before
-                # attempting the test tone.
                 sink_name = None
                 if engine.pipewire is not None:
                     sink_name = engine.pipewire.wait_for_bluetooth_sink(
@@ -390,6 +392,9 @@ def create_app(engine: "BridgeEngine") -> Flask:
                     test_sound_ok = engine.pipewire.play_test_sound(mac)
                 else:
                     _LOG.warning("[Test] A2DP sink for %s never appeared — skipping test tone", mac)
+        except Exception as exc:
+            _LOG.exception("[Test] test-connect failed for %s", mac)
+            return jsonify({"status": "error", "message": str(exc)}), 500
         finally:
             if engine.monitor:
                 engine.monitor.resume()

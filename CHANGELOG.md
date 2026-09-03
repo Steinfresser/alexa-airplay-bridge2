@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.34 (2026-09-03)
+
+- **Fixed WirePlumber "can't find protocol PipeWire:Protocol:Native"**: the custom `wireplumber.conf` from 2.0.32 replaced the entire WirePlumber configuration instead of supplementing it. The `context.modules` section was missing, so `libpipewire-module-protocol-native` was never loaded and WirePlumber could not connect to PipeWire at all — no Bluetooth sinks were ever created. Replaced the monolithic config with a drop-in fragment at `wireplumber.conf.d/90-headless-bluetooth.conf` that only disables `seat-monitoring` and `logind` without touching module loading.
+- **Fixed NameError crash in `_force_bt_reconnect`**: the method referenced `_mac_to_path()` which is defined in `bluetooth.py`, not `pipewire.py`. Removed the unused variable assignment that caused the `NameError` and the HTTP 500 on every test-connect attempt.
+- **Fixed aggressive A2DP disconnect/reconnect loop**: the 2.0.32 fix forced a `DisconnectProfile`/`ConnectProfile` cycle on every `Error.Failed` response. This created an infinite loop because BlueZ considers the profile connected and returns `Error.Failed` again on reconnect. Now treats `Error.Failed` as success (profile already connected) and defers sink detection to the polling loop.
+- **Added exponential backoff for InProgress errors**: A2DP `ConnectProfile` retries now use 1s/3s/5s backoff instead of fixed 2s delays, preventing BlueZ from being overwhelmed during profile negotiation.
+- **Added Flask catch-all error handler**: unhandled exceptions in API endpoints now return structured JSON `{"status": "error", "message": "..."}` instead of raw HTML 500 pages. The `test-connect` endpoint specifically catches and reports errors.
+
 ## 2.0.33 (2026-09-02)
 
 - **Fixed shairport-sync using ALSA backend instead of PulseAudio — root cause of audio crash**: the generated `shairport-sync.conf` included BOTH an `alsa = {}` block and a `pa = {}` block when a Bluetooth sink was available. shairport-sync prioritizes ALSA when both backends are configured, so it tried to open the ALSA `default` device — which failed with "Unable to set hw parameters: I/O error" and crashed. Now only the `pa` (PulseAudio) backend is written when a Bluetooth A2DP sink exists; the `alsa` block is used exclusively as a fallback when no sink is available.
