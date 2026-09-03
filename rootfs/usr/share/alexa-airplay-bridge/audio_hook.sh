@@ -24,9 +24,9 @@ MAC="${2:-}"
 PHASE="${3:-enter}"
 LOG_TAG="[AIRPLAY-HOOK]"
 
-# Resolve runtime paths.
+# Resolve runtime paths (inherit from shairport-sync env when available).
 DATA_DIR="/data"
-RUNTIME_DIR="${DATA_DIR}/pipewire"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/data/pipewire}"
 PULSE_SOCKET="${RUNTIME_DIR}/pulse/native"
 DB_FILE="${DATA_DIR}/options.json"
 SWITCH_SCRIPT="/usr/share/alexa-airplay-bridge/bt_switch.sh"

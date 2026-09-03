@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.37 (2026-09-03)
+
+- **Fixed disappearing Bluetooth A2DP sink (root cause of no audio)**: WirePlumber was suspending and removing idle Bluetooth sink nodes after a few seconds. By the time shairport-sync or the test tone tried to play audio, the sink was gone and everything routed to `auto_null` (silence). Three fixes:
+  1. **WirePlumber config**: Added `session.suspend-timeout-seconds = 0`, `node.pause-on-idle = false`, and `node.suspend-on-idle = false` for all `bluez_sink.*` and `bluez_output.*` nodes so WirePlumber never removes them.
+  2. **Sink keepalive**: After the A2DP sink appears, a background `pacat` process streams silence at volume 0 to hold the PipeWire node active. This guarantees the sink stays alive until the speaker is disconnected.
+  3. **Test tone guard**: The test tone now refuses to play to `auto_null` and instead logs full diagnostics, so we immediately see when the sink has vanished.
+- **Fixed audio_hook.sh hardcoded runtime path**: The hook script used a hardcoded path instead of inheriting `XDG_RUNTIME_DIR` from shairport-sync's environment. Now uses the inherited value, matching the fix already applied to `bt_switch.sh`.
+
 ## 2.0.36 (2026-09-03)
 
 - **Fixed shairport-sync crash: "pa" backend not supported**: the `-o pa` flag added in 2.0.35 caused a fatal crash because this build of shairport-sync does not expose a working "pa" backend despite being compiled with `--with-pulseaudio`. Reverted to the ALSA backend, which works through PipeWire's ALSA compatibility layer. Audio is now routed to the correct Bluetooth sink via the `PIPEWIRE_NODE` environment variable set to the A2DP sink name. This is the standard PipeWire mechanism for sink targeting.

@@ -27,6 +27,7 @@ class PipeWireManager:
         self._pipewire_proc: Optional[subprocess.Popen] = None
         self._pulse_proc: Optional[subprocess.Popen] = None
         self._wireplumber_proc: Optional[subprocess.Popen] = None
+        self._keepalive_procs: dict[str, subprocess.Popen] = {}
 
     @property
     def env(self) -> dict[str, str]:
@@ -118,6 +119,7 @@ class PipeWireManager:
         return "\n".join(lines)
 
     def stop(self) -> None:
+        self.stop_all_keepalives()
         with self._lock:
             for name, proc in (
                 ("pipewire-pulse", self._pulse_proc),
@@ -312,6 +314,7 @@ class PipeWireManager:
             if sink:
                 _LOG.info("[PipeWire] A2DP sink %s appeared after %d attempt(s) for %s", sink, attempt, mac)
                 self.set_default_sink(sink)
+                self._start_sink_keepalive(sink, mac)
                 _LOG.info("[PipeWire] Waiting 2s for A2DP transport to settle for %s", mac)
                 time.sleep(2.0)
                 self._force_transport(sink)
@@ -471,6 +474,45 @@ class PipeWireManager:
             return tmp_path
         return _TEST_WAV_PATH  # last resort — let the player report the error
 
+    def _start_sink_keepalive(self, sink: str, mac: str) -> None:
+        """Start a background process that holds the A2DP sink open.
+
+        WirePlumber suspends and eventually removes idle Bluetooth nodes.
+        A silent pacat stream keeps the sink active so shairport-sync can
+        write audio to it at any time without the node vanishing.
+        """
+        self._stop_sink_keepalive(mac)
+        try:
+            proc = subprocess.Popen(  # noqa: S603
+                ["pacat", "--playback", "--device", sink,
+                 "--rate=44100", "--channels=2", "--format=s16le",
+                 "--volume=0", "/dev/zero"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self.env,
+            )
+            self._keepalive_procs[mac] = proc
+            _LOG.info("[PipeWire] Sink keepalive started for %s (pid=%d, sink=%s)", mac, proc.pid, sink)
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("[PipeWire] Failed to start sink keepalive for %s: %s", mac, exc)
+
+    def _stop_sink_keepalive(self, mac: str) -> None:
+        """Stop the keepalive process for a speaker."""
+        proc = self._keepalive_procs.pop(mac, None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            _LOG.info("[PipeWire] Sink keepalive stopped for %s", mac)
+
+    def stop_all_keepalives(self) -> None:
+        """Stop all keepalive processes (called during shutdown)."""
+        for mac in list(self._keepalive_procs):
+            self._stop_sink_keepalive(mac)
+
     def _force_transport(self, sink: str) -> None:
         """Force the A2DP transport to (re)acquire by suspending and resuming the sink.
 
@@ -494,9 +536,13 @@ class PipeWireManager:
         """
         sink = self.find_bluetooth_sink(mac)
         if sink is None:
+            _LOG.warning("[PipeWire] BT sink not found for %s — dumping diagnostics", mac)
+            _LOG.warning("[PipeWire] Diagnostics:\n%s", self.dump_diagnostics())
             sink = self.get_default_sink()
-        if sink is None:
-            _LOG.warning("[PipeWire] No sink available for test sound to %s", mac)
+        if sink is None or sink == "auto_null":
+            _LOG.error("[PipeWire] No usable sink for test sound to %s (sink=%s). "
+                       "The A2DP node has likely been removed by WirePlumber.",
+                       mac, sink)
             return False
 
         # Force the A2DP transport to acquire before doing anything else.
